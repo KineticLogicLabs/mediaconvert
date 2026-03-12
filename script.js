@@ -36,7 +36,8 @@ window.showFormatDetails = function(catKey) {
 };
 
 window.hideFormatDetails = function() {
-    document.getElementById('formatDetailPanel')?.classList.add('hidden');
+    const panel = document.getElementById('formatDetailPanel');
+    if (panel) panel.classList.add('hidden');
     currentVisibleCategory = null;
 };
 
@@ -90,7 +91,7 @@ async function runConversion(id) {
 
         if (item.category === 'VIDEO' || (item.category === 'AUDIO' && target !== 'wav')) {
             const ready = await initFFmpeg();
-            if (!ready) throw new Error("Security block: SharedArrayBuffer restricted.");
+            if (!ready) throw new Error("Media Engine Restricted. Try refreshing.");
             blob = await transcodeMedia(item, target, (p) => {
                 item.progress = Math.max(10, Math.floor(p * 100));
                 render();
@@ -149,12 +150,20 @@ async function processAudioNative(file) {
 async function transcodeMedia(item, target, onProgress) {
     const inName = `in_${item.id}_${item.name}`;
     const outName = `out_${item.id}.${target}`;
-    ffmpeg.setProgress(({ ratio }) => onProgress(ratio));
+    
+    ffmpeg.setProgress(({ ratio }) => {
+        if (ratio >= 0 && ratio <= 1) onProgress(ratio);
+    });
+
     ffmpeg.FS('writeFile', inName, await FFmpeg.fetchFile(item.file));
-    await ffmpeg.run('-i', inName, outName);
+    
+    // Using -vn (no video) to prevent errors with audio files that have album art
+    await ffmpeg.run('-i', inName, '-vn', outName);
+    
     const data = ffmpeg.FS('readFile', outName);
     ffmpeg.FS('unlink', inName);
     ffmpeg.FS('unlink', outName);
+    
     const mimes = { 'mp4': 'video/mp4', 'webm': 'video/webm', 'gif': 'image/gif', 'mp3': 'audio/mpeg', 'ogg': 'audio/ogg' };
     return new Blob([data.buffer], { type: mimes[target] || 'application/octet-stream' });
 }
@@ -177,6 +186,7 @@ async function processImage(file, target) {
             canvas.toBlob(b => b ? resolve(b) : reject("Buffer Error"), mime, 0.9);
             URL.revokeObjectURL(img.src);
         };
+        img.onerror = () => reject("Image processing failed.");
         img.src = URL.createObjectURL(source);
     });
 }
@@ -240,7 +250,7 @@ window.updateFormat = (id, val) => {
     const i = state.queue.find(x => x.id === id); 
     if(i) {
         i.outputFormat = val;
-        // If the format changes after conversion, reset status so user has to re-convert
+        // Strict reset: if they change format, they must re-convert
         i.status = 'idle';
         i.result = null;
         i.progress = 0;
@@ -254,7 +264,8 @@ window.download = (id) => {
     const url = URL.createObjectURL(item.result);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${item.name.split('.')[0]}.${item.outputFormat}`;
+    const base = item.name.substring(0, item.name.lastIndexOf('.')) || item.name;
+    a.download = `${base}.${item.outputFormat}`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 200);
 };
@@ -267,7 +278,7 @@ function render() {
 
     if (!list || !container) return;
     
-    // Hide warning if no errors exist in the queue
+    // Reactive Error Cleanup: Hide global warning if no errors exist in the current queue
     const hasErrors = state.queue.some(item => item.status === 'error');
     if (!hasErrors) {
         warningEl?.classList.add('hidden');
@@ -283,18 +294,22 @@ function render() {
         div.innerHTML = `
             <div class="flex items-center justify-between gap-4">
                 <div class="flex items-center gap-4 truncate">
-                    <div class="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400"><i class="fas ${ENGINES[item.category]?.icon || 'fa-file'}"></i></div>
+                    <div class="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400">
+                        <i class="fas ${ENGINES[item.category]?.icon || 'fa-file'}"></i>
+                    </div>
                     <div class="truncate">
                         <h4 class="font-bold text-sm text-slate-900 truncate">${item.name}</h4>
                         <span class="text-[10px] text-slate-400 uppercase font-black">${item.size}</span>
                     </div>
                 </div>
                 <div class="flex items-center gap-2">
-                    <select onchange="window.updateFormat('${item.id}', this.value)" class="text-xs font-bold bg-slate-50 p-1 rounded-lg border">
+                    <select onchange="window.updateFormat('${item.id}', this.value)" class="text-xs font-bold bg-slate-50 p-1 rounded-lg border focus:outline-none">
                         ${item.targets.map(t => `<option value="${t}" ${item.outputFormat === t ? 'selected' : ''}>.${t.toUpperCase()}</option>`).join('')}
                     </select>
                     <div class="w-24">${renderAction(item)}</div>
-                    <button onclick="window.remove('${item.id}')" class="text-slate-300 hover:text-red-500 transition-colors"><i class="fas fa-times"></i></button>
+                    <button onclick="window.remove('${item.id}')" class="text-slate-300 hover:text-red-500 transition-colors">
+                        <i class="fas fa-times-circle text-lg"></i>
+                    </button>
                 </div>
             </div>
             ${item.status === 'working' ? `<div class="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden"><div class="h-full bg-indigo-600 transition-all duration-300" style="width: ${item.progress}%"></div></div>` : ''}
