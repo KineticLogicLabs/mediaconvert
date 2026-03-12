@@ -9,7 +9,6 @@ let currentVisibleCategory = null;
 window.showFormatDetails = function(catKey) {
     const panel = document.getElementById('formatDetailPanel');
     
-    // Toggle behavior: If the same category is clicked, hide it
     if (currentVisibleCategory === catKey) {
         window.hideFormatDetails();
         return;
@@ -54,24 +53,41 @@ let ffmpegLoaded = false;
 const state = { queue: [] };
 
 // --- 3. PROCESSING ENGINES ---
+
+/**
+ * Enhanced FFmpeg Initialization
+ */
 async function initFFmpeg() {
     if (ffmpegLoaded) return true;
     const warningEl = document.getElementById('securityWarning');
 
+    // SharedArrayBuffer is the "Full Power" indicator
     if (typeof SharedArrayBuffer === 'undefined') {
         warningEl?.classList.remove('hidden');
+        // Add a button to the warning to try a hard reload
+        if (warningEl && !warningEl.querySelector('.reload-btn')) {
+            const btn = document.createElement('button');
+            btn.className = 'reload-btn ml-auto bg-red-600 text-white px-3 py-1 rounded-lg text-[10px] font-bold uppercase';
+            btn.innerText = 'Repair Engine';
+            btn.onclick = () => window.location.reload();
+            warningEl.appendChild(btn);
+        }
         return false;
     }
 
     try {
         if (!ffmpeg) {
-            ffmpeg = FFmpeg.createFFmpeg({ log: false });
+            ffmpeg = FFmpeg.createFFmpeg({ 
+                log: true,
+                corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js'
+            });
         }
         await ffmpeg.load();
         ffmpegLoaded = true;
         warningEl?.classList.add('hidden');
         return true;
     } catch (e) {
+        console.error("FFmpeg Core failed:", e);
         warningEl?.classList.remove('hidden');
         return false;
     }
@@ -89,9 +105,11 @@ async function runConversion(id) {
         let blob;
         const target = item.outputFormat;
 
+        // Video and non-WAV audio require the Restricted Engine
         if (item.category === 'VIDEO' || (item.category === 'AUDIO' && target !== 'wav')) {
             const ready = await initFFmpeg();
-            if (!ready) throw new Error("Media Engine Restricted. Try refreshing.");
+            if (!ready) throw new Error("Security block: Media Engine cannot start. Refresh the page.");
+            
             blob = await transcodeMedia(item, target, (p) => {
                 item.progress = Math.max(10, Math.floor(p * 100));
                 render();
@@ -157,14 +175,23 @@ async function transcodeMedia(item, target, onProgress) {
 
     ffmpeg.FS('writeFile', inName, await FFmpeg.fetchFile(item.file));
     
-    // Using -vn (no video) to prevent errors with audio files that have album art
-    await ffmpeg.run('-i', inName, '-vn', outName);
+    // Command differs slightly for video vs audio
+    if (item.category === 'VIDEO') {
+        // Fast transcode for video
+        await ffmpeg.run('-i', inName, '-preset', 'ultrafast', outName);
+    } else {
+        // Audio transcode without video track
+        await ffmpeg.run('-i', inName, '-vn', outName);
+    }
     
     const data = ffmpeg.FS('readFile', outName);
     ffmpeg.FS('unlink', inName);
     ffmpeg.FS('unlink', outName);
     
-    const mimes = { 'mp4': 'video/mp4', 'webm': 'video/webm', 'gif': 'image/gif', 'mp3': 'audio/mpeg', 'ogg': 'audio/ogg' };
+    const mimes = { 
+        'mp4': 'video/mp4', 'webm': 'video/webm', 'gif': 'image/gif', 
+        'mp3': 'audio/mpeg', 'ogg': 'audio/ogg' 
+    };
     return new Blob([data.buffer], { type: mimes[target] || 'application/octet-stream' });
 }
 
@@ -250,7 +277,6 @@ window.updateFormat = (id, val) => {
     const i = state.queue.find(x => x.id === id); 
     if(i) {
         i.outputFormat = val;
-        // Strict reset: if they change format, they must re-convert
         i.status = 'idle';
         i.result = null;
         i.progress = 0;
@@ -278,9 +304,9 @@ function render() {
 
     if (!list || !container) return;
     
-    // Reactive Error Cleanup: Hide global warning if no errors exist in the current queue
+    // Auto-hide warning if errors are gone
     const hasErrors = state.queue.some(item => item.status === 'error');
-    if (!hasErrors) {
+    if (!hasErrors && typeof SharedArrayBuffer !== 'undefined') {
         warningEl?.classList.add('hidden');
     }
 
