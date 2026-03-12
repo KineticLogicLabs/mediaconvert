@@ -53,32 +53,56 @@ const ENGINES = {
 
 let ffmpeg = null;
 let ffmpegLoaded = false;
+let ffmpegLoading = false;
 const state = { queue: [] };
 
 // --- 3. PROCESSING ENGINES ---
 async function initFFmpeg() {
     if (ffmpegLoaded) return true;
+    if (ffmpegLoading) return new Promise((resolve) => {
+        const check = setInterval(() => {
+            if (ffmpegLoaded) { clearInterval(check); resolve(true); }
+            if (!ffmpegLoading && !ffmpegLoaded) { clearInterval(check); resolve(false); }
+        }, 100);
+    });
+
+    ffmpegLoading = true;
     const warningEl = document.getElementById('securityWarning');
 
     if (typeof SharedArrayBuffer === 'undefined') {
-        warningEl?.classList.remove('hidden-zero-height');
-        warningEl?.classList.add('visible-height');
+        ffmpegLoading = false;
+        showSecurityWarning(true);
         return false;
     }
 
     try {
         if (!ffmpeg) {
-            ffmpeg = FFmpeg.createFFmpeg({ log: false });
+            ffmpeg = FFmpeg.createFFmpeg({ 
+                log: false,
+                corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js'
+            });
         }
         await ffmpeg.load();
         ffmpegLoaded = true;
-        warningEl?.classList.add('hidden-zero-height');
-        warningEl?.classList.remove('visible-height');
+        ffmpegLoading = false;
+        showSecurityWarning(false);
         return true;
     } catch (e) {
+        console.error("FFmpeg Load Fail:", e);
+        ffmpegLoading = false;
+        showSecurityWarning(true);
+        return false;
+    }
+}
+
+function showSecurityWarning(show) {
+    const warningEl = document.getElementById('securityWarning');
+    if (show) {
         warningEl?.classList.remove('hidden-zero-height');
         warningEl?.classList.add('visible-height');
-        return false;
+    } else {
+        warningEl?.classList.add('hidden-zero-height');
+        warningEl?.classList.remove('visible-height');
     }
 }
 
@@ -94,15 +118,17 @@ async function runConversion(id) {
         let blob;
         const target = item.outputFormat;
 
+        // Route to specialized engines
         if (item.category === 'VIDEO' || (item.category === 'AUDIO' && target !== 'wav')) {
             const ready = await initFFmpeg();
-            if (!ready) throw new Error("Security block: Media engine restricted.");
+            if (!ready) throw new Error("Browser security block: Engine cannot start.");
             
             blob = await transcodeMedia(item, target, (p) => {
                 item.progress = Math.max(1, Math.floor(p * 100));
                 render();
             });
         } else if (item.category === 'AUDIO' && target === 'wav') {
+            // Native WAV path - 100% reliability, no security blocks
             blob = await processAudioNative(item.file);
         } else if (item.category === 'IMAGE') {
             blob = await processImage(item.file, target);
@@ -158,8 +184,10 @@ async function transcodeMedia(item, target, onProgress) {
     ffmpeg.FS('writeFile', inName, await FFmpeg.fetchFile(item.file));
     
     if (item.category === 'VIDEO') {
-        await ffmpeg.run('-i', inName, '-preset', 'ultrafast', outName);
+        // Fast transcode for browsers
+        await ffmpeg.run('-i', inName, '-preset', 'ultrafast', '-c:v', 'libx264', '-crf', '28', outName);
     } else {
+        // Audio transcode: remove video streams to prevent errors with album art
         await ffmpeg.run('-i', inName, '-vn', '-acodec', target === 'mp3' ? 'libmp3lame' : (target === 'ogg' ? 'libvorbis' : 'copy'), outName);
     }
     
@@ -187,10 +215,10 @@ async function processImage(file, target) {
             canvas.width = img.width; canvas.height = img.height;
             ctx.drawImage(img, 0, 0);
             const mime = `image/${target === 'jpg' ? 'jpeg' : target}`;
-            canvas.toBlob(b => b ? resolve(b) : reject("Buffer Error"), mime, 0.9);
+            canvas.toBlob(b => b ? resolve(b) : reject("Processing error"), mime, 0.9);
             URL.revokeObjectURL(img.src);
         };
-        img.onerror = () => reject("Image processing failed.");
+        img.onerror = () => reject("Image load failure");
         img.src = URL.createObjectURL(source);
     });
 }
@@ -265,7 +293,8 @@ window.download = (id) => {
     const url = URL.createObjectURL(item.result);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${item.name.split('.')[0]}.${item.outputFormat}`;
+    const base = item.name.substring(0, item.name.lastIndexOf('.')) || item.name;
+    a.download = `${base}.${item.outputFormat}`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 200);
 };
@@ -274,15 +303,15 @@ function render() {
     const list = document.getElementById('fileList');
     const container = document.getElementById('queueContainer');
     const badge = document.getElementById('queueBadge');
-    const warningEl = document.getElementById('securityWarning');
     if (!list || !container) return;
     
+    // Manage Global Warning Visibility
     const hasErrors = state.queue.some(item => item.status === 'error');
-    if (!hasErrors && typeof SharedArrayBuffer !== 'undefined') {
-        warningEl?.classList.add('hidden-zero-height');
-        warningEl?.classList.remove('visible-height');
+    if (!hasErrors) {
+        showSecurityWarning(false);
     }
 
+    // Manage Pipeline Visibility
     if (state.queue.length === 0) {
         container.classList.add('hidden-zero-height');
         container.classList.remove('visible-height');
@@ -322,7 +351,7 @@ function render() {
                     <span class="text-[10px] font-black text-indigo-600 w-8 text-right">${item.progress}%</span>
                 </div>
             ` : ''}
-            ${item.status === 'error' ? `<p class="text-[10px] text-red-500 font-bold uppercase">${item.errorMsg}</p>` : ''}
+            ${item.status === 'error' ? `<p class="text-[10px] text-red-500 font-bold uppercase tracking-tight">${item.errorMsg}</p>` : ''}
         `;
         list.appendChild(div);
     });
