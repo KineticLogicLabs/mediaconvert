@@ -8,13 +8,10 @@ let currentVisibleCategory = null;
 
 window.showFormatDetails = function(catKey) {
     const panel = document.getElementById('formatDetailPanel');
-    
-    // Toggle behavior: If the same category is clicked, hide it
     if (currentVisibleCategory === catKey) {
         window.hideFormatDetails();
         return;
     }
-
     const config = ENGINES[catKey];
     if(!config || !panel) return;
 
@@ -43,12 +40,32 @@ window.hideFormatDetails = function() {
     currentVisibleCategory = null;
 };
 
-// --- 2. CONFIGURATION ---
+// --- 2. CONFIGURATION (Expanded Formats) ---
 const ENGINES = {
-    IMAGE: { title: "Images", ext: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'ico', 'heic', 'heif', 'tiff', 'svg', 'avif'], targets: ['png', 'jpg', 'webp', 'bmp', 'ico', 'tiff'], icon: 'fa-image', color: 'bg-blue-50 text-blue-500' },
-    VIDEO: { title: "Videos", ext: ['mp4', 'webm', 'mov', 'avi', 'mkv', 'flv', 'wmv', '3gp', 'ogv', 'mpeg', 'ts'], targets: ['mp4', 'webm', 'mov', 'avi', 'mkv', 'gif'], icon: 'fa-video', color: 'bg-rose-50 text-rose-500' },
-    AUDIO: { title: "Audio", ext: ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'wma', 'aiff', 'opus'], targets: ['mp3', 'wav', 'ogg', 'aac', 'flac', 'm4a'], icon: 'fa-music', color: 'bg-purple-50 text-purple-500' },
-    DATA: { title: "Data & Docs", ext: ['xlsx', 'csv', 'json', 'txt', 'md', 'pdf', 'html', 'xml'], targets: ['pdf', 'xlsx', 'csv', 'json', 'txt', 'md', 'html'], icon: 'fa-file-code', color: 'bg-emerald-50 text-emerald-500' }
+    IMAGE: { 
+        title: "Images", 
+        ext: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'ico', 'heic', 'heif', 'tiff', 'svg', 'avif', 'tga'], 
+        targets: ['png', 'jpg', 'webp', 'bmp', 'ico', 'tiff'], 
+        icon: 'fa-image', color: 'bg-blue-50 text-blue-500' 
+    },
+    VIDEO: { 
+        title: "Videos", 
+        ext: ['mp4', 'webm', 'mov', 'avi', 'mkv', 'flv', 'wmv', '3gp', 'ogv', 'mpeg', 'ts', 'm4v'], 
+        targets: ['mp4', 'webm', 'mov', 'avi', 'mkv', 'gif'], 
+        icon: 'fa-video', color: 'bg-rose-50 text-rose-500' 
+    },
+    AUDIO: { 
+        title: "Audio", 
+        ext: ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'wma', 'aiff', 'opus', 'amr', 'm4r'], 
+        targets: ['mp3', 'wav', 'ogg', 'aac', 'flac', 'm4a'], 
+        icon: 'fa-music', color: 'bg-purple-50 text-purple-500' 
+    },
+    DATA: { 
+        title: "Data & Docs", 
+        ext: ['xlsx', 'csv', 'json', 'txt', 'md', 'pdf', 'html', 'xml', 'yaml', 'ini'], 
+        targets: ['pdf', 'xlsx', 'csv', 'json', 'txt', 'md', 'html'], 
+        icon: 'fa-file-code', color: 'bg-emerald-50 text-emerald-500' 
+    }
 };
 
 let ffmpeg = null;
@@ -56,30 +73,31 @@ let ffmpegLoaded = false;
 let ffmpegLoading = false;
 const state = { queue: [] };
 
-// --- 3. PROCESSING ENGINES ---
+// --- 3. THE "GUARANTEED" PROCESSING ENGINE ---
+
 async function initFFmpeg() {
     if (ffmpegLoaded) return true;
-    if (ffmpegLoading) return new Promise((resolve) => {
-        const check = setInterval(() => {
-            if (ffmpegLoaded) { clearInterval(check); resolve(true); }
-            if (!ffmpegLoading && !ffmpegLoaded) { clearInterval(check); resolve(false); }
-        }, 100);
+    if (ffmpegLoading) return new Promise(r => {
+        const i = setInterval(() => { if(ffmpegLoaded){clearInterval(i);r(true)} if(!ffmpegLoading){clearInterval(i);r(false)} }, 100);
     });
 
     ffmpegLoading = true;
     const warningEl = document.getElementById('securityWarning');
 
-    if (typeof SharedArrayBuffer === 'undefined') {
-        ffmpegLoading = false;
-        showSecurityWarning(true);
-        return false;
-    }
+    // DETECT SECURITY RESTRICTION
+    const isRestricted = typeof SharedArrayBuffer === 'undefined';
+    
+    // Select the correct core: Standard (Fast) or Single-Threaded (Compatible)
+    // ST core works everywhere, even without COOP/COEP headers
+    const corePath = isRestricted 
+        ? 'https://unpkg.com/@ffmpeg/core-st@0.11.0/dist/ffmpeg-core.js' 
+        : 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js';
 
     try {
         if (!ffmpeg) {
             ffmpeg = FFmpeg.createFFmpeg({ 
-                log: false,
-                corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js'
+                log: false, 
+                corePath: corePath 
             });
         }
         await ffmpeg.load();
@@ -90,6 +108,7 @@ async function initFFmpeg() {
     } catch (e) {
         console.error("FFmpeg Load Fail:", e);
         ffmpegLoading = false;
+        // If even the ST core fails, then we show the warning
         showSecurityWarning(true);
         return false;
     }
@@ -118,17 +137,15 @@ async function runConversion(id) {
         let blob;
         const target = item.outputFormat;
 
-        // Route to specialized engines
         if (item.category === 'VIDEO' || (item.category === 'AUDIO' && target !== 'wav')) {
             const ready = await initFFmpeg();
-            if (!ready) throw new Error("Browser security block: Engine cannot start.");
+            if (!ready) throw new Error("Media engine could not start.");
             
             blob = await transcodeMedia(item, target, (p) => {
                 item.progress = Math.max(1, Math.floor(p * 100));
                 render();
             });
         } else if (item.category === 'AUDIO' && target === 'wav') {
-            // Native WAV path - 100% reliability, no security blocks
             blob = await processAudioNative(item.file);
         } else if (item.category === 'IMAGE') {
             blob = await processImage(item.file, target);
@@ -146,6 +163,34 @@ async function runConversion(id) {
     render();
 }
 
+async function transcodeMedia(item, target, onProgress) {
+    const inName = `input_${item.id}_${item.name}`;
+    const outName = `output_${item.id}.${target}`;
+    ffmpeg.setProgress(({ ratio }) => onProgress(ratio));
+    ffmpeg.FS('writeFile', inName, await FFmpeg.fetchFile(item.file));
+    
+    // Command Logic
+    if (item.category === 'VIDEO') {
+        // Presets optimized for browser CPU
+        await ffmpeg.run('-i', inName, '-preset', 'ultrafast', '-c:v', 'libx264', '-crf', '28', '-c:a', 'aac', outName);
+    } else {
+        // Audio: Force a specific codec for MP3/OGG to ensure compatibility
+        const codec = target === 'mp3' ? 'libmp3lame' : (target === 'ogg' ? 'libvorbis' : 'copy');
+        await ffmpeg.run('-i', inName, '-vn', '-acodec', codec, outName);
+    }
+    
+    const data = ffmpeg.FS('readFile', outName);
+    ffmpeg.FS('unlink', inName); 
+    ffmpeg.FS('unlink', outName);
+
+    const mimes = { 
+        'mp4': 'video/mp4', 'webm': 'video/webm', 'mov': 'video/quicktime', 'avi': 'video/x-msvideo', 'mkv': 'video/x-matroska',
+        'mp3': 'audio/mpeg', 'ogg': 'audio/ogg', 'aac': 'audio/aac', 'flac': 'audio/flac', 'm4a': 'audio/mp4', 'gif': 'image/gif' 
+    };
+    return new Blob([data.buffer], { type: mimes[target] || 'application/octet-stream' });
+}
+
+// Native WAV Logic (Bypasses all engines)
 async function processAudioNative(file) {
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     const arrayBuffer = await file.arrayBuffer();
@@ -156,15 +201,12 @@ async function processAudioNative(file) {
     const view = new DataView(buffer);
     const channels = [];
     let offset = 0; let pos = 0;
-
     const setUint32 = (d) => { view.setUint32(pos, d, true); pos += 4; };
     const setUint16 = (d) => { view.setUint16(pos, d, true); pos += 2; };
-
     setUint32(0x46464952); setUint32(length - 8); setUint32(0x45564157); setUint32(0x20746d66);
     setUint32(16); setUint16(1); setUint16(numOfChan); setUint32(audioBuffer.sampleRate);
     setUint32(audioBuffer.sampleRate * 2 * numOfChan); setUint16(numOfChan * 2);
     setUint16(16); setUint32(0x61746164); setUint32(length - pos - 4);
-
     for(let i=0; i<numOfChan; i++) channels.push(audioBuffer.getChannelData(i));
     while(pos < length) {
         for(let i=0; i<numOfChan; i++) {
@@ -175,29 +217,6 @@ async function processAudioNative(file) {
         offset++;
     }
     return new Blob([buffer], { type: 'audio/wav' });
-}
-
-async function transcodeMedia(item, target, onProgress) {
-    const inName = `in_${item.id}_${item.name}`;
-    const outName = `out_${item.id}.${target}`;
-    ffmpeg.setProgress(({ ratio }) => onProgress(ratio));
-    ffmpeg.FS('writeFile', inName, await FFmpeg.fetchFile(item.file));
-    
-    if (item.category === 'VIDEO') {
-        // Fast transcode for browsers
-        await ffmpeg.run('-i', inName, '-preset', 'ultrafast', '-c:v', 'libx264', '-crf', '28', outName);
-    } else {
-        // Audio transcode: remove video streams to prevent errors with album art
-        await ffmpeg.run('-i', inName, '-vn', '-acodec', target === 'mp3' ? 'libmp3lame' : (target === 'ogg' ? 'libvorbis' : 'copy'), outName);
-    }
-    
-    const data = ffmpeg.FS('readFile', outName);
-    ffmpeg.FS('unlink', inName); ffmpeg.FS('unlink', outName);
-    const mimes = { 
-        'mp4': 'video/mp4', 'webm': 'video/webm', 'mov': 'video/quicktime', 'avi': 'video/x-msvideo', 'mkv': 'video/x-matroska',
-        'mp3': 'audio/mpeg', 'ogg': 'audio/ogg', 'aac': 'audio/aac', 'flac': 'audio/flac', 'm4a': 'audio/mp4', 'gif': 'image/gif' 
-    };
-    return new Blob([data.buffer], { type: mimes[target] || 'application/octet-stream' });
 }
 
 async function processImage(file, target) {
@@ -215,10 +234,10 @@ async function processImage(file, target) {
             canvas.width = img.width; canvas.height = img.height;
             ctx.drawImage(img, 0, 0);
             const mime = `image/${target === 'jpg' ? 'jpeg' : target}`;
-            canvas.toBlob(b => b ? resolve(b) : reject("Processing error"), mime, 0.9);
+            canvas.toBlob(b => b ? resolve(b) : reject("Processing Error"), mime, 0.9);
             URL.revokeObjectURL(img.src);
         };
-        img.onerror = () => reject("Image load failure");
+        img.onerror = () => reject("Image Failed to Load");
         img.src = URL.createObjectURL(source);
     });
 }
@@ -303,15 +322,12 @@ function render() {
     const list = document.getElementById('fileList');
     const container = document.getElementById('queueContainer');
     const badge = document.getElementById('queueBadge');
+    
     if (!list || !container) return;
     
-    // Manage Global Warning Visibility
     const hasErrors = state.queue.some(item => item.status === 'error');
-    if (!hasErrors) {
-        showSecurityWarning(false);
-    }
+    if (!hasErrors) { showSecurityWarning(false); }
 
-    // Manage Pipeline Visibility
     if (state.queue.length === 0) {
         container.classList.add('hidden-zero-height');
         container.classList.remove('visible-height');
@@ -329,7 +345,9 @@ function render() {
         div.innerHTML = `
             <div class="flex items-center justify-between gap-4">
                 <div class="flex items-center gap-4 truncate">
-                    <div class="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400"><i class="fas ${ENGINES[item.category]?.icon || 'fa-file'}"></i></div>
+                    <div class="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400">
+                        <i class="fas ${ENGINES[item.category]?.icon || 'fa-file'}"></i>
+                    </div>
                     <div class="truncate">
                         <h4 class="font-bold text-sm text-slate-900 truncate">${item.name}</h4>
                         <span class="text-[10px] text-slate-400 uppercase font-black">${item.size}</span>
@@ -340,7 +358,9 @@ function render() {
                         ${item.targets.map(t => `<option value="${t}" ${item.outputFormat === t ? 'selected' : ''}>.${t.toUpperCase()}</option>`).join('')}
                     </select>
                     <div class="w-24">${renderAction(item)}</div>
-                    <button onclick="window.remove('${item.id}')" class="text-slate-300 hover:text-red-500 transition-colors"><i class="fas fa-times-circle text-lg"></i></button>
+                    <button onclick="window.remove('${item.id}')" class="text-slate-300 hover:text-red-500 transition-colors">
+                        <i class="fas fa-times-circle text-lg"></i>
+                    </button>
                 </div>
             </div>
             ${item.status === 'working' ? `
