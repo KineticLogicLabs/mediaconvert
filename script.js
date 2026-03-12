@@ -3,6 +3,32 @@
  * (c) 2026 Kinetic Logic Labs
  */
 
+// --- 1. GLOBAL UI HELPERS ---
+window.showFormatDetails = function(catKey) {
+    const config = ENGINES[catKey];
+    if(!config) return;
+    const panel = document.getElementById('formatDetailPanel');
+    const title = document.getElementById('detailTitle');
+    const icon = document.getElementById('detailIcon');
+    const inputs = document.getElementById('inputFormats');
+    const outputs = document.getElementById('outputFormats');
+    if (!panel) return;
+
+    title.innerText = config.title;
+    icon.className = `w-12 h-12 rounded-xl flex items-center justify-center ${config.color}`;
+    icon.innerHTML = `<i class="fas ${config.icon} text-xl"></i>`;
+    inputs.innerHTML = config.ext.map(f => `<span class="px-3 py-1 bg-slate-100 rounded-lg text-[10px] font-bold text-slate-500 uppercase">.${f}</span>`).join('');
+    outputs.innerHTML = config.targets.map(f => `<span class="px-3 py-1 bg-indigo-50 rounded-lg text-[10px] font-bold text-indigo-600 uppercase">.${f}</span>`).join('');
+    
+    panel.classList.remove('hidden');
+    panel.scrollIntoView({ behavior: 'smooth', block: 'end' });
+};
+
+window.hideFormatDetails = function() {
+    document.getElementById('formatDetailPanel')?.classList.add('hidden');
+};
+
+// --- 2. CONFIGURATION ---
 const ENGINES = {
     IMAGE: { title: "Images", ext: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'ico', 'heic', 'heif', 'tiff', 'svg', 'avif'], targets: ['png', 'jpg', 'webp', 'bmp', 'ico'], icon: 'fa-image', color: 'bg-blue-50 text-blue-500' },
     VIDEO: { title: "Videos", ext: ['mp4', 'webm', 'mov', 'avi', 'mkv', 'flv', 'wmv', '3gp', 'ogv', 'mpeg', 'ts'], targets: ['mp4', 'webm', 'gif'], icon: 'fa-video', color: 'bg-rose-50 text-rose-500' },
@@ -14,12 +40,9 @@ let ffmpeg = null;
 let ffmpegLoaded = false;
 const state = { queue: [] };
 
-/**
- * Initializes the FFmpeg engine. 
- */
+// --- 3. PROCESSING ENGINES ---
 async function initFFmpeg() {
     if (ffmpegLoaded) return true;
-    
     const warningEl = document.getElementById('securityWarning');
 
     if (typeof SharedArrayBuffer === 'undefined') {
@@ -36,76 +59,9 @@ async function initFFmpeg() {
         warningEl?.classList.add('hidden');
         return true;
     } catch (e) {
-        console.error("FFmpeg Error:", e);
         warningEl?.classList.remove('hidden');
         return false;
     }
-}
-
-function setupApp() {
-    const dropZone = document.getElementById('dropZone');
-    const fileInput = document.getElementById('fileInput');
-    const selectFilesBtn = document.getElementById('selectFilesBtn');
-    const convertAllBtn = document.getElementById('convertAllBtn');
-    const clearBtn = document.getElementById('clearBtn');
-
-    selectFilesBtn?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        fileInput.click();
-    });
-
-    dropZone?.addEventListener('click', (e) => {
-        if (e.target.tagName !== 'BUTTON') fileInput.click();
-    });
-
-    fileInput?.addEventListener('change', (e) => {
-        if (e.target.files.length > 0) {
-            handleFiles(e.target.files);
-            fileInput.value = ''; 
-        }
-    });
-
-    dropZone?.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        dropZone.classList.add('border-indigo-500', 'bg-indigo-50/20');
-    });
-
-    dropZone?.addEventListener('dragleave', () => {
-        dropZone.classList.remove('border-indigo-500', 'bg-indigo-50/20');
-    });
-
-    dropZone?.addEventListener('drop', (e) => {
-        e.preventDefault();
-        dropZone.classList.remove('border-indigo-500', 'bg-indigo-50/20');
-        if (e.dataTransfer.files.length > 0) handleFiles(e.dataTransfer.files);
-    });
-
-    if (clearBtn) clearBtn.onclick = () => { state.queue = []; render(); };
-    if (convertAllBtn) convertAllBtn.onclick = async () => {
-        for (let item of state.queue) {
-            if (item.status === 'idle') await runConversion(item.id);
-        }
-    };
-}
-
-function handleFiles(files) {
-    Array.from(files).forEach(file => {
-        const ext = file.name.split('.').pop().toLowerCase();
-        let category = 'UNKNOWN';
-        let targets = [];
-        for (const [key, val] of Object.entries(ENGINES)) {
-            if (val.ext.includes(ext)) { category = key; targets = val.targets; break; }
-        }
-        state.queue.push({
-            id: Math.random().toString(36).substr(2, 9),
-            file, name: file.name,
-            size: (file.size / 1024 / 1024).toFixed(2) + ' MB',
-            category, targets,
-            outputFormat: targets[0] || '',
-            status: 'idle', progress: 0, result: null
-        });
-    });
-    render();
 }
 
 async function runConversion(id) {
@@ -123,13 +79,11 @@ async function runConversion(id) {
         if (item.category === 'VIDEO' || (item.category === 'AUDIO' && target !== 'wav')) {
             const ready = await initFFmpeg();
             if (!ready) throw new Error("Security block: SharedArrayBuffer restricted.");
-            
             blob = await transcodeMedia(item, target, (p) => {
                 item.progress = Math.max(10, Math.floor(p * 100));
                 render();
             });
         } else if (item.category === 'AUDIO' && target === 'wav') {
-            // NATIVE PATH: No FFmpeg/SharedArrayBuffer needed for WAV
             blob = await processAudioNative(item.file);
         } else if (item.category === 'IMAGE') {
             blob = await processImage(item.file, target);
@@ -147,15 +101,11 @@ async function runConversion(id) {
     render();
 }
 
-/**
- * Converts audio to WAV using native browser APIs (No security restrictions)
- */
 async function processAudioNative(file) {
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     const arrayBuffer = await file.arrayBuffer();
     const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
     
-    // Simple WAV encoding logic
     const numOfChan = audioBuffer.numberOfChannels;
     const length = audioBuffer.length * numOfChan * 2 + 44;
     const buffer = new ArrayBuffer(length);
@@ -164,26 +114,15 @@ async function processAudioNative(file) {
     let offset = 0;
     let pos = 0;
 
-    // Write WAV header
     const setUint32 = (d) => { view.setUint32(pos, d, true); pos += 4; };
     const setUint16 = (d) => { view.setUint16(pos, d, true); pos += 2; };
 
-    setUint32(0x46464952); // "RIFF"
-    setUint32(length - 8); 
-    setUint32(0x45564157); // "WAVE"
-    setUint32(0x20746d66); // "fmt "
-    setUint32(16);         // length
-    setUint16(1);          // PCM
-    setUint16(numOfChan);
-    setUint32(audioBuffer.sampleRate);
-    setUint32(audioBuffer.sampleRate * 2 * numOfChan);
-    setUint16(numOfChan * 2);
-    setUint16(16);
-    setUint32(0x61746164); // "data"
-    setUint32(length - pos - 4);
+    setUint32(0x46464952); setUint32(length - 8); setUint32(0x45564157); setUint32(0x20746d66);
+    setUint32(16); setUint16(1); setUint16(numOfChan); setUint32(audioBuffer.sampleRate);
+    setUint32(audioBuffer.sampleRate * 2 * numOfChan); setUint16(numOfChan * 2);
+    setUint16(16); setUint32(0x61746164); setUint32(length - pos - 4);
 
     for(let i=0; i<numOfChan; i++) channels.push(audioBuffer.getChannelData(i));
-
     while(pos < length) {
         for(let i=0; i<numOfChan; i++) {
             let sample = Math.max(-1, Math.min(1, channels[i][offset]));
@@ -231,18 +170,53 @@ async function processImage(file, target) {
 }
 
 async function processData(file, target) {
-    const { jsPDF } = window.jspdf;
-    if (['pdf', 'txt'].includes(target)) {
+    if (target === 'pdf') {
+        const { jsPDF } = window.jspdf;
         const text = await file.text();
-        if (target === 'pdf') {
-            const doc = new jsPDF();
-            const lines = doc.splitTextToSize(text, 180);
-            doc.text(lines, 10, 10);
-            return doc.output('blob');
-        }
-        return new Blob([text], { type: 'text/plain' });
+        const doc = new jsPDF();
+        doc.text(doc.splitTextToSize(text, 180), 10, 10);
+        return doc.output('blob');
     }
     return file; 
+}
+
+// --- 4. APP SETUP & RENDERING ---
+function setupApp() {
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const selectFilesBtn = document.getElementById('selectFilesBtn');
+    const convertAllBtn = document.getElementById('convertAllBtn');
+    const clearBtn = document.getElementById('clearBtn');
+
+    selectFilesBtn?.addEventListener('click', (e) => { e.stopPropagation(); fileInput.click(); });
+    dropZone?.addEventListener('click', (e) => { if (e.target.tagName !== 'BUTTON') fileInput.click(); });
+    fileInput?.addEventListener('change', (e) => { if (e.target.files.length > 0) { handleFiles(e.target.files); fileInput.value = ''; } });
+    dropZone?.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('bg-indigo-50/20'); });
+    dropZone?.addEventListener('dragleave', () => dropZone.classList.remove('bg-indigo-50/20'));
+    dropZone?.addEventListener('drop', (e) => { e.preventDefault(); dropZone.classList.remove('bg-indigo-50/20'); handleFiles(e.dataTransfer.files); });
+
+    if (clearBtn) clearBtn.onclick = () => { state.queue = []; render(); };
+    if (convertAllBtn) convertAllBtn.onclick = async () => { for (let item of state.queue) { if (item.status === 'idle') await runConversion(item.id); } };
+}
+
+function handleFiles(files) {
+    Array.from(files).forEach(file => {
+        const ext = file.name.split('.').pop().toLowerCase();
+        let category = 'UNKNOWN';
+        let targets = [];
+        for (const [key, val] of Object.entries(ENGINES)) {
+            if (val.ext.includes(ext)) { category = key; targets = val.targets; break; }
+        }
+        state.queue.push({
+            id: Math.random().toString(36).substr(2, 9),
+            file, name: file.name,
+            size: (file.size / 1024 / 1024).toFixed(2) + ' MB',
+            category, targets,
+            outputFormat: targets[0] || '',
+            status: 'idle', progress: 0, result: null
+        });
+    });
+    render();
 }
 
 window.remove = (id) => { state.queue = state.queue.filter(i => i.id !== id); render(); };
@@ -253,8 +227,7 @@ window.download = (id) => {
     const url = URL.createObjectURL(item.result);
     const a = document.createElement('a');
     a.href = url;
-    const base = item.name.substring(0, item.name.lastIndexOf('.')) || item.name;
-    a.download = `${base}.${item.outputFormat}`;
+    a.download = `${item.name.split('.')[0]}.${item.outputFormat}`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 200);
 };
@@ -270,7 +243,6 @@ function render() {
     state.queue.forEach(item => {
         const div = document.createElement('div');
         div.className = 'bg-white border border-slate-200 p-5 rounded-3xl shadow-sm flex flex-col gap-4 animate-in fade-in slide-in-from-bottom-2 duration-300';
-        const options = item.targets.map(t => `<option value="${t}" ${item.outputFormat === t ? 'selected' : ''}>.${t.toUpperCase()}</option>`).join('');
         div.innerHTML = `
             <div class="flex items-center justify-between gap-4">
                 <div class="flex items-center gap-4 truncate">
@@ -281,11 +253,11 @@ function render() {
                     </div>
                 </div>
                 <div class="flex items-center gap-2">
-                    <select onchange="updateFormat('${item.id}', this.value)" class="text-xs font-bold bg-slate-50 p-1 rounded-lg border focus:outline-none">
-                        ${options}
+                    <select onchange="window.updateFormat('${item.id}', this.value)" class="text-xs font-bold bg-slate-50 p-1 rounded-lg border">
+                        ${item.targets.map(t => `<option value="${t}" ${item.outputFormat === t ? 'selected' : ''}>.${t.toUpperCase()}</option>`).join('')}
                     </select>
                     <div class="w-24">${renderAction(item)}</div>
-                    <button onclick="remove('${item.id}')" class="text-slate-300 hover:text-red-500 transition-colors"><i class="fas fa-times"></i></button>
+                    <button onclick="window.remove('${item.id}')" class="text-slate-300 hover:text-red-500"><i class="fas fa-times"></i></button>
                 </div>
             </div>
             ${item.status === 'working' ? `<div class="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden"><div class="h-full bg-indigo-600 transition-all duration-300" style="width: ${item.progress}%"></div></div>` : ''}
@@ -296,32 +268,10 @@ function render() {
 }
 
 function renderAction(item) {
-    if (item.status === 'idle') return `<button onclick="runConversion('${item.id}')" class="w-full bg-slate-900 text-white text-[10px] py-2 rounded-xl font-bold uppercase hover:bg-indigo-600 transition-all">Convert</button>`;
+    if (item.status === 'idle') return `<button onclick="runConversion('${item.id}')" class="w-full bg-slate-900 text-white text-[10px] py-2 rounded-xl font-bold uppercase">Convert</button>`;
     if (item.status === 'working') return `<div class="flex justify-center"><div class="animate-spin rounded-full h-4 w-4 border-2 border-indigo-600 border-t-transparent"></div></div>`;
-    if (item.status === 'done') return `<button onclick="download('${item.id}')" class="w-full bg-green-500 text-white text-[10px] py-2 rounded-xl font-bold uppercase hover:bg-green-600">Save</button>`;
+    if (item.status === 'done') return `<button onclick="window.download('${item.id}')" class="w-full bg-green-500 text-white text-[10px] py-2 rounded-xl font-bold uppercase">Save</button>`;
     return `<span class="text-red-500 text-[10px] font-bold">Error</span>`;
 }
-
-window.showFormatDetails = function(catKey) {
-    const config = ENGINES[catKey];
-    if(!config) return;
-    const panel = document.getElementById('formatDetailPanel');
-    const title = document.getElementById('detailTitle');
-    const icon = document.getElementById('detailIcon');
-    const inputs = document.getElementById('inputFormats');
-    const outputs = document.getElementById('outputFormats');
-    if (!panel) return;
-    title.innerText = config.title;
-    icon.className = `w-12 h-12 rounded-xl flex items-center justify-center ${config.color}`;
-    icon.innerHTML = `<i class="fas ${config.icon} text-xl"></i>`;
-    inputs.innerHTML = config.ext.map(f => `<span class="px-3 py-1 bg-slate-100 rounded-lg text-[10px] font-bold text-slate-500 uppercase">.${f}</span>`).join('');
-    outputs.innerHTML = config.targets.map(f => `<span class="px-3 py-1 bg-indigo-50 rounded-lg text-[10px] font-bold text-indigo-600 uppercase">.${f}</span>`).join('');
-    panel.classList.remove('hidden');
-    panel.scrollIntoView({ behavior: 'smooth', block: 'end' });
-};
-
-window.hideFormatDetails = function() {
-    document.getElementById('formatDetailPanel')?.classList.add('hidden');
-};
 
 document.addEventListener('DOMContentLoaded', setupApp);
