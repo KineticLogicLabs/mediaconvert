@@ -1,10 +1,44 @@
 /**
  * MediaConvert Logic - Professional Multi-File Version
- * (c) 2026 Kinetic Logic Labs - v2.0 Optimized
+ * (c) 2026 Kinetic Logic Labs - v3.0 Robust Edition
  */
 
-// --- 1. GLOBAL UI & CONFIG ---
+// --- 1. GLOBAL UI HELPERS ---
 let currentVisibleCategory = null;
+
+window.showFormatDetails = function(catKey) {
+    const panel = document.getElementById('formatDetailPanel');
+    if (currentVisibleCategory === catKey) {
+        window.hideFormatDetails();
+        return;
+    }
+
+    const config = ENGINES[catKey];
+    if(!config || !panel) return;
+
+    document.getElementById('detailTitle').innerText = config.title;
+    const icon = document.getElementById('detailIcon');
+    icon.className = `w-12 h-12 rounded-xl flex items-center justify-center ${config.color}`;
+    icon.innerHTML = `<i class="fas ${config.icon} text-xl"></i>`;
+    
+    document.getElementById('inputFormats').innerHTML = config.ext.map(f => `<span class="px-3 py-1 bg-slate-100 rounded-lg text-[10px] font-bold text-slate-500 uppercase">.${f}</span>`).join('');
+    document.getElementById('outputFormats').innerHTML = config.targets.map(f => `<span class="px-3 py-1 bg-indigo-50 rounded-lg text-[10px] font-bold text-indigo-600 uppercase">.${f}</span>`).join('');
+    
+    panel.classList.remove('hidden-zero-height');
+    panel.classList.add('visible-height');
+    currentVisibleCategory = catKey;
+};
+
+window.hideFormatDetails = function() {
+    const panel = document.getElementById('formatDetailPanel');
+    if (panel) {
+        panel.classList.add('hidden-zero-height');
+        panel.classList.remove('visible-height');
+    }
+    currentVisibleCategory = null;
+};
+
+// --- 2. CONFIGURATION ---
 const ENGINES = {
     IMAGE: { title: "Images", ext: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'ico', 'heic', 'heif', 'tiff', 'svg', 'avif'], targets: ['png', 'jpg', 'webp', 'bmp', 'ico', 'tiff'], icon: 'fa-image', color: 'bg-blue-50 text-blue-500' },
     VIDEO: { title: "Videos", ext: ['mp4', 'webm', 'mov', 'avi', 'mkv', 'flv', 'wmv', '3gp', 'ogv', 'mpeg', 'ts'], targets: ['mp4', 'webm', 'mov', 'avi', 'mkv', 'gif'], icon: 'fa-video', color: 'bg-rose-50 text-rose-500' },
@@ -17,53 +51,66 @@ let ffmpegLoaded = false;
 let ffmpegLoading = false;
 const state = { queue: [] };
 
-// --- 2. ENGINE INITIALIZATION ---
+// --- 3. PROCESSING ENGINES ---
 async function initFFmpeg() {
     if (ffmpegLoaded) return true;
-    if (ffmpegLoading) return new Promise(resolve => {
-        const check = setInterval(() => { if (ffmpegLoaded) { clearInterval(check); resolve(true); } }, 100);
+    if (ffmpegLoading) return new Promise(r => {
+        const i = setInterval(() => { if(ffmpegLoaded){ clearInterval(i); r(true); }}, 100);
     });
 
     ffmpegLoading = true;
+    
+    // Check for Cross-Origin Isolation (Required for FFmpeg WASM)
     if (typeof SharedArrayBuffer === 'undefined') {
         ffmpegLoading = false;
-        showSecurityWarning(true);
-        return false;
+        return false; 
     }
 
     try {
-        ffmpeg = FFmpeg.createFFmpeg({ 
-            log: false, 
-            corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js' 
+        const { createFFmpeg } = FFmpeg;
+        ffmpeg = createFFmpeg({ 
+            log: false,
+            corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js'
         });
         await ffmpeg.load();
         ffmpegLoaded = true;
         ffmpegLoading = false;
         return true;
     } catch (e) {
-        console.error("FFmpeg Init Error:", e);
+        console.error("FFmpeg Load Fail:", e);
         ffmpegLoading = false;
         return false;
     }
 }
 
-// --- 3. CORE PROCESSING ---
 async function runConversion(id) {
     const item = state.queue.find(i => i.id === id);
-    if (!item || item.status === 'working') return;
+    if (!item) return;
 
     item.status = 'working';
     item.progress = 1;
     render();
 
     try {
-        const target = item.outputFormat;
         let blob;
+        const target = item.outputFormat;
 
         if (item.category === 'VIDEO' || item.category === 'AUDIO') {
             const ready = await initFFmpeg();
-            if (!ready) throw new Error("FFmpeg could not initialize. Check COOP/COEP headers.");
-            blob = await processMediaFFmpeg(item, target);
+            
+            if (!ready) {
+                // FALLBACK: If FFmpeg is blocked, only WAV works
+                if (item.category === 'AUDIO' && target === 'wav') {
+                    blob = await processAudioNative(item.file);
+                } else {
+                    document.getElementById('securityWarning').classList.remove('hidden-zero-height');
+                    document.getElementById('securityWarning').classList.add('visible-height');
+                    throw new Error("Secure context required for this format.");
+                }
+            } else {
+                // Standard FFmpeg Path
+                blob = await transcodeMedia(item, target);
+            }
         } else if (item.category === 'IMAGE') {
             blob = await processImage(item.file, target);
         } else if (item.category === 'DATA') {
@@ -75,82 +122,89 @@ async function runConversion(id) {
         item.progress = 100;
     } catch (err) {
         item.status = 'error';
-        item.errorMsg = err.message || "Conversion failed";
+        item.errorMsg = err.message;
     }
     render();
 }
 
-async function processMediaFFmpeg(item, target) {
-    const inName = `input_${item.id}`;
-    const outName = `output_${item.id}.${target}`;
+async function transcodeMedia(item, target) {
+    const inName = `in_${item.id}`;
+    const outName = `out_${item.id}.${target}`;
     
-    // Write file to FFmpeg Virtual FS
-    ffmpeg.FS('writeFile', inName, await FFmpeg.fetchFile(item.file));
-    
-    // Set Progress Hook
     ffmpeg.setProgress(({ ratio }) => {
-        item.progress = Math.max(1, Math.min(99, Math.floor(ratio * 100)));
+        item.progress = Math.max(1, Math.floor(ratio * 100));
         render();
     });
 
+    ffmpeg.FS('writeFile', inName, await FFmpeg.fetchFile(item.file));
+    
     const args = ['-i', inName];
-
     if (item.category === 'AUDIO') {
-        // -vn: Remove video/album art streams (critical for stability)
-        // -map 0:a:0: Force only the first audio stream
+        // Strip video/cover art and pick first audio stream
         args.push('-vn', '-map', '0:a:0');
-        
-        const audioCodecs = {
-            'mp3': ['-c:a', 'libmp3lame', '-q:a', '2'],
-            'wav': ['-c:a', 'pcm_s16le'],
-            'ogg': ['-c:a', 'libvorbis', '-q:a', '4'],
-            'aac': ['-c:a', 'aac'],
-            'm4a': ['-c:a', 'aac'],
-            'flac': ['-c:a', 'flac']
-        };
-        args.push(...(audioCodecs[target] || ['-c:a', 'copy']));
+        const encoders = { 'mp3': 'libmp3lame', 'ogg': 'libvorbis', 'wav': 'pcm_s16le', 'aac': 'aac', 'm4a': 'aac', 'flac': 'flac' };
+        args.push('-c:a', encoders[target] || 'copy');
     } else {
-        // Video Logic
         args.push('-preset', 'ultrafast', '-c:v', 'libx264', '-crf', '28', '-c:a', 'aac');
     }
-
     args.push(outName);
-    await ffmpeg.run(...args);
 
-    const data = ffmpeg.FS('readFile', outName);
+    await ffmpeg.run(...args);
     
-    // Cleanup FS
+    const data = ffmpeg.FS('readFile', outName);
     ffmpeg.FS('unlink', inName);
     ffmpeg.FS('unlink', outName);
-
-    const mimeMap = { 
-        'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'ogg': 'audio/ogg', 
-        'aac': 'audio/aac', 'm4a': 'audio/mp4', 'flac': 'audio/flac',
-        'mp4': 'video/mp4', 'webm': 'video/webm'
-    };
-
-    return new Blob([data.buffer], { type: mimeMap[target] || 'application/octet-stream' });
+    
+    const mimes = { 'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'ogg': 'audio/ogg', 'mp4': 'video/mp4', 'webm': 'video/webm' };
+    return new Blob([data.buffer], { type: mimes[target] || 'application/octet-stream' });
 }
 
-// --- 4. IMAGE & DATA FALLBACKS ---
+// WAV Fallback for non-secure contexts
+async function processAudioNative(file) {
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const arrayBuffer = await file.arrayBuffer();
+    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+    const numOfChan = audioBuffer.numberOfChannels;
+    const length = audioBuffer.length * numOfChan * 2 + 44;
+    const buffer = new ArrayBuffer(length);
+    const view = new DataView(buffer);
+    let pos = 0;
+
+    const setUint32 = (d) => { view.setUint32(pos, d, true); pos += 4; };
+    const setUint16 = (d) => { view.setUint16(pos, d, true); pos += 2; };
+
+    setUint32(0x46464952); setUint32(length - 8); setUint32(0x45564157); setUint32(0x20746d66);
+    setUint32(16); setUint16(1); setUint16(numOfChan); setUint32(audioBuffer.sampleRate);
+    setUint32(audioBuffer.sampleRate * 2 * numOfChan); setUint16(numOfChan * 2);
+    setUint16(16); setUint32(0x61746164); setUint32(length - pos - 4);
+
+    for (let i = 0; i < audioBuffer.length; i++) {
+        for (let channel = 0; channel < numOfChan; channel++) {
+            let sample = audioBuffer.getChannelData(channel)[i];
+            sample = Math.max(-1, Math.min(1, sample));
+            view.setInt16(pos, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+            pos += 2;
+        }
+    }
+    return new Blob([buffer], { type: 'audio/wav' });
+}
+
 async function processImage(file, target) {
-    return new Promise((resolve, reject) => {
+    const source = (file.name.match(/\.(heic|heif)$/i)) ? await heic2any({ blob: file, toType: "image/jpeg" }) : file;
+    return new Promise((resolve) => {
         const img = new Image();
         img.onload = () => {
-            const canvas = document.createElement('canvas');
-            canvas.width = img.width; canvas.height = img.height;
+            const canvas = document.getElementById('conversionCanvas');
             const ctx = canvas.getContext('2d');
+            canvas.width = img.width; canvas.height = img.height;
             ctx.drawImage(img, 0, 0);
-            const type = target === 'jpg' ? 'image/jpeg' : `image/${target}`;
-            canvas.toBlob(b => b ? resolve(b) : reject("Canvas error"), type, 0.9);
+            canvas.toBlob(b => resolve(b), `image/${target === 'jpg' ? 'jpeg' : target}`, 0.9);
         };
-        img.onerror = () => reject("Load failed");
-        img.src = URL.createObjectURL(file);
+        img.src = URL.createObjectURL(Array.isArray(source) ? source[0] : source);
     });
 }
 
 async function processData(file, target) {
-    // Basic data passthrough or PDF generation
     if (target === 'pdf') {
         const { jsPDF } = window.jspdf;
         const text = await file.text();
@@ -161,17 +215,14 @@ async function processData(file, target) {
     return file;
 }
 
-// --- 5. UI CONTROLLERS ---
+// --- 4. APP LOGIC ---
 function handleFiles(files) {
     Array.from(files).forEach(file => {
         const ext = file.name.split('.').pop().toLowerCase();
-        let category = 'UNKNOWN';
-        let targets = [];
-        
+        let category = 'UNKNOWN', targets = [];
         for (const [key, val] of Object.entries(ENGINES)) {
             if (val.ext.includes(ext)) { category = key; targets = val.targets; break; }
         }
-
         state.queue.push({
             id: Math.random().toString(36).substr(2, 9),
             file, name: file.name,
@@ -184,15 +235,37 @@ function handleFiles(files) {
     render();
 }
 
-// --- 6. RENDER ENGINE ---
+window.remove = (id) => { state.queue = state.queue.filter(i => i.id !== id); render(); };
+window.updateFormat = (id, val) => { 
+    const item = state.queue.find(x => x.id === id); 
+    if(item) { item.outputFormat = val; item.status = 'idle'; render(); } 
+};
+
+window.download = (id) => {
+    const item = state.queue.find(i => i.id === id);
+    if (!item?.result) return;
+    const url = URL.createObjectURL(item.result);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${item.name.split('.')[0]}.${item.outputFormat}`;
+    a.click();
+    URL.revokeObjectURL(url);
+};
+
 function render() {
     const list = document.getElementById('fileList');
     const container = document.getElementById('queueContainer');
-    if (!list || !container) return;
+    const badge = document.getElementById('queueBadge');
+    
+    if (state.queue.length > 0) {
+        container.classList.remove('hidden-zero-height');
+        container.classList.add('visible-height');
+    } else {
+        container.classList.add('hidden-zero-height');
+        container.classList.remove('visible-height');
+    }
 
-    container.classList.toggle('visible-height', state.queue.length > 0);
-    container.classList.toggle('hidden-zero-height', state.queue.length === 0);
-
+    if(badge) badge.innerText = state.queue.length;
     list.innerHTML = state.queue.map(item => `
         <div class="bg-white border border-slate-200 p-5 rounded-3xl shadow-sm flex flex-col gap-4">
             <div class="flex items-center justify-between gap-4">
@@ -221,7 +294,7 @@ function render() {
                     <span class="text-[10px] font-black text-indigo-600 w-8 text-right">${item.progress}%</span>
                 </div>
             ` : ''}
-            ${item.status === 'error' ? `<p class="text-[10px] text-red-500 font-bold uppercase">${item.errorMsg}</p>` : ''}
+            ${item.status === 'error' ? `<p class="text-[10px] text-red-500 font-bold uppercase tracking-tight">${item.errorMsg}</p>` : ''}
         </div>
     `).join('');
 }
@@ -233,35 +306,17 @@ function renderAction(item) {
     return `<span class="text-red-500 text-[10px] font-bold">Error</span>`;
 }
 
-// --- 7. HELPER FUNCTIONS ---
-window.updateFormat = (id, val) => { const i = state.queue.find(x => x.id === id); if(i) { i.outputFormat = val; i.status = 'idle'; render(); } };
-window.remove = (id) => { state.queue = state.queue.filter(i => i.id !== id); render(); };
-window.download = (id) => {
-    const item = state.queue.find(i => i.id === id);
-    if (!item?.result) return;
-    const url = URL.createObjectURL(item.result);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${item.name.split('.')[0]}.${item.outputFormat}`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 200);
-};
-
-function showSecurityWarning(show) {
-    const warningEl = document.getElementById('securityWarning');
-    warningEl?.classList.toggle('visible-height', show);
-    warningEl?.classList.toggle('hidden-zero-height', !show);
-}
-
-// --- 8. INITIALIZATION ---
 document.addEventListener('DOMContentLoaded', () => {
     const fileInput = document.getElementById('fileInput');
+    const selectBtn = document.getElementById('selectFilesBtn');
     const dropZone = document.getElementById('dropZone');
-    
-    document.getElementById('selectFilesBtn')?.addEventListener('click', () => fileInput.click());
-    fileInput?.addEventListener('change', (e) => handleFiles(e.target.files));
-    
-    dropZone?.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('bg-indigo-50/20'); });
-    dropZone?.addEventListener('dragleave', () => dropZone.classList.remove('bg-indigo-50/20'));
-    dropZone?.addEventListener('drop', (e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); });
+
+    selectBtn.onclick = () => fileInput.click();
+    fileInput.onchange = (e) => handleFiles(e.target.files);
+    dropZone.ondragover = (e) => { e.preventDefault(); dropZone.classList.add('bg-indigo-50/20'); };
+    dropZone.ondrop = (e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); };
+    document.getElementById('convertAllBtn').onclick = async () => {
+        for(let item of state.queue) if(item.status === 'idle') await runConversion(item.id);
+    };
+    document.getElementById('clearBtn').onclick = () => { state.queue = []; render(); };
 });
