@@ -1,0 +1,59 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap');
+
+body {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    background: #f8fafc;
+    color: #0f172a;
+}
+
+.drop-zone {
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    border: 2px dashed #e2e8f0;
+    background: #ffffff;
+}
+
+.drop-zone.drag-over {
+    border-color: #6366f1;
+    background-color: #f5f3ff;
+    transform: scale(1.005);
+}
+
+.glass-panel {
+    background: rgba(255, 255, 255, 0.9);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(226, 232, 240, 0.8);
+}
+
+.loader {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #6366f1;
+    border-bottom-color: transparent;
+    border-radius: 50%;
+    display: inline-block;
+    animation: rotation 1s linear infinite;
+}
+
+@keyframes rotation { 
+    0% { transform: rotate(0deg); } 
+    100% { transform: rotate(360deg); } 
+}
+
+.category-tag {
+    font-size: 0.6rem;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.025em;
+}
+
+.cat-image { background: #dcfce7; color: #15803d; }
+.cat-video { background: #fee2e2; color: #b91c1c; }
+.cat-audio { background: #f3e8ff; color: #7e22ce; }
+.cat-data { background: #fef9c3; color: #a16207; }
+.cat-document { background: #e0f2fe; color: #0369a1; }
+
+.progress-bar-inner {
+    transition: width 0.3s ease;
+}
