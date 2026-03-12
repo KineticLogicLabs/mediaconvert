@@ -4,67 +4,35 @@
  */
 
 // --- 1. GLOBAL UI FUNCTIONS ---
-// We define these at the absolute top of the file and attach them to the window 
-// to ensure the HTML "onclick" events can find them even if other parts of the script error.
-
 window.showFormatDetails = function(catKey) {
     const config = ENGINES[catKey];
     if(!config) return;
-
     const panel = document.getElementById('formatDetailPanel');
     const title = document.getElementById('detailTitle');
     const icon = document.getElementById('detailIcon');
     const inputs = document.getElementById('inputFormats');
     const outputs = document.getElementById('outputFormats');
-
-    if (!panel || !title || !icon || !inputs || !outputs) return;
+    if (!panel) return;
 
     title.innerText = config.title;
     icon.className = `w-12 h-12 rounded-xl flex items-center justify-center ${config.color}`;
     icon.innerHTML = `<i class="fas ${config.icon} text-xl"></i>`;
-    
     inputs.innerHTML = config.ext.map(f => `<span class="format-pill">.${f}</span>`).join('');
     outputs.innerHTML = config.targets.map(f => `<span class="format-pill bg-indigo-50 border-indigo-100 text-indigo-600">.${f}</span>`).join('');
-
     panel.classList.remove('hidden');
     panel.scrollIntoView({ behavior: 'smooth', block: 'end' });
 };
 
 window.hideFormatDetails = function() {
-    const panel = document.getElementById('formatDetailPanel');
-    if (panel) panel.classList.add('hidden');
+    document.getElementById('formatDetailPanel')?.classList.add('hidden');
 };
 
 // --- 2. CONFIGURATION ---
 const ENGINES = {
-    IMAGE: {
-        title: "Images",
-        ext: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'ico', 'heic', 'heif', 'tiff', 'svg', 'avif'],
-        targets: ['png', 'jpg', 'webp', 'bmp', 'ico'],
-        icon: 'fa-image',
-        color: 'bg-blue-50 text-blue-500'
-    },
-    VIDEO: {
-        title: "Videos",
-        ext: ['mp4', 'webm', 'mov', 'avi', 'mkv', 'flv', 'wmv', '3gp', 'ogv', 'mpeg', 'ts'],
-        targets: ['mp4', 'webm', 'gif', 'avi', 'mov'],
-        icon: 'fa-video',
-        color: 'bg-rose-50 text-rose-500'
-    },
-    AUDIO: {
-        title: "Audio",
-        ext: ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'wma', 'aiff', 'opus', 'amr', 'm4r'],
-        targets: ['mp3', 'wav', 'ogg', 'aac', 'flac'],
-        icon: 'fa-music',
-        color: 'bg-purple-50 text-purple-500'
-    },
-    DATA: {
-        title: "Data & Docs",
-        ext: ['xlsx', 'xls', 'csv', 'json', 'txt', 'md', 'xml', 'html', 'sql', 'log', 'yaml', 'ini', 'pdf'],
-        targets: ['pdf', 'xlsx', 'csv', 'json', 'txt', 'md', 'html'],
-        icon: 'fa-file-code',
-        color: 'bg-emerald-50 text-emerald-500'
-    }
+    IMAGE: { title: "Images", ext: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'ico', 'heic', 'heif', 'tiff', 'svg', 'avif'], targets: ['png', 'jpg', 'webp', 'bmp', 'ico'], icon: 'fa-image', color: 'bg-blue-50 text-blue-500' },
+    VIDEO: { title: "Videos", ext: ['mp4', 'webm', 'mov', 'avi', 'mkv', 'flv', 'wmv', '3gp', 'ogv', 'mpeg', 'ts'], targets: ['mp4', 'webm', 'gif', 'avi', 'mov'], icon: 'fa-video', color: 'bg-rose-50 text-rose-500' },
+    AUDIO: { title: "Audio", ext: ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'wma', 'aiff', 'opus', 'amr', 'm4r'], targets: ['mp3', 'wav', 'ogg', 'aac', 'flac'], icon: 'fa-music', color: 'bg-purple-50 text-purple-500' },
+    DATA: { title: "Data & Docs", ext: ['xlsx', 'xls', 'csv', 'json', 'txt', 'md', 'xml', 'html', 'sql', 'log', 'yaml', 'ini', 'pdf'], targets: ['pdf', 'xlsx', 'csv', 'json', 'txt', 'md', 'html'], icon: 'fa-file-code', color: 'bg-emerald-50 text-emerald-500' }
 };
 
 // --- 3. STATE & ENGINES ---
@@ -79,16 +47,13 @@ async function initFFmpeg() {
         document.getElementById('securityWarning')?.classList.remove('hidden');
         return;
     }
-
     if (typeof FFmpeg !== 'undefined') {
         try {
             ffmpeg = FFmpeg.createFFmpeg({ log: false });
             await ffmpeg.load();
             ffmpegLoaded = true;
             console.log("MediaConvert: FFmpeg Engine Ready.");
-        } catch (e) {
-            console.warn("MediaConvert: FFmpeg failed to load.", e);
-        }
+        } catch (e) { console.warn("FFmpeg failed to load.", e); }
     }
 }
 
@@ -96,20 +61,26 @@ async function initFFmpeg() {
 function setupApp() {
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('fileInput');
+    const selectFilesBtn = document.getElementById('selectFilesBtn');
     const convertAllBtn = document.getElementById('convertAllBtn');
     const clearBtn = document.getElementById('clearBtn');
 
     if (!dropZone || !fileInput) return;
 
-    // Handle clicking the drop zone
-    dropZone.addEventListener('click', (e) => {
-        // Only trigger if we aren't clicking a button or link inside it
-        if (e.target.tagName !== 'BUTTON' && e.target.tagName !== 'A') {
+    // Direct button listener (Highest reliability)
+    if (selectFilesBtn) {
+        selectFilesBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
             fileInput.click();
-        }
+        });
+    }
+
+    // Drop zone background listener
+    dropZone.addEventListener('click', (e) => {
+        if (e.target !== selectFilesBtn) fileInput.click();
     });
 
-    // File selection
     fileInput.addEventListener('change', (e) => {
         if (e.target.files.length > 0) {
             handleFiles(e.target.files);
@@ -120,19 +91,15 @@ function setupApp() {
     // Drag & Drop
     dropZone.addEventListener('dragover', (e) => {
         e.preventDefault();
-        dropZone.classList.add('border-indigo-500', 'bg-indigo-50/50', 'shadow-2xl');
+        dropZone.classList.add('border-indigo-500', 'bg-indigo-50/50');
     });
-
     dropZone.addEventListener('dragleave', () => {
-        dropZone.classList.remove('border-indigo-500', 'bg-indigo-50/50', 'shadow-2xl');
+        dropZone.classList.remove('border-indigo-500', 'bg-indigo-50/50');
     });
-
     dropZone.addEventListener('drop', (e) => {
         e.preventDefault();
         dropZone.classList.remove('border-indigo-500', 'bg-indigo-50/50');
-        if (e.dataTransfer.files.length > 0) {
-            handleFiles(e.dataTransfer.files);
-        }
+        if (e.dataTransfer.files.length > 0) handleFiles(e.dataTransfer.files);
     });
 
     if (clearBtn) clearBtn.onclick = (e) => { e.stopPropagation(); state.queue = []; render(); };
@@ -149,22 +116,16 @@ function handleFiles(files) {
         const ext = file.name.split('.').pop().toLowerCase();
         let category = 'UNKNOWN';
         let targets = [];
-
         for (const [key, val] of Object.entries(ENGINES)) {
             if (val.ext.includes(ext)) { category = key; targets = val.targets; break; }
         }
-
         state.queue.push({
             id: Math.random().toString(36).substr(2, 9),
-            file,
-            name: file.name,
+            file, name: file.name,
             size: (file.size / 1024 / 1024).toFixed(2) + ' MB',
-            category,
-            targets,
+            category, targets,
             outputFormat: targets[0] || '',
-            status: 'idle', 
-            progress: 0,
-            result: null
+            status: 'idle', progress: 0, result: null
         });
     });
     render();
@@ -173,58 +134,44 @@ function handleFiles(files) {
 async function runConversion(id) {
     const item = state.queue.find(i => i.id === id);
     if (!item) return;
-
     item.status = 'working';
     item.progress = 5;
     render();
-
     try {
         let blob;
         const target = item.outputFormat;
-
         if (item.category === 'VIDEO' || item.category === 'AUDIO') {
-            if (ffmpegIncompatible) throw new Error("Security Restriction: SharedArrayBuffer not available.");
+            if (ffmpegIncompatible) throw new Error("Security Restriction: SharedArrayBuffer required.");
             if (!ffmpegLoaded) throw new Error("Media engine not ready.");
             blob = await transcodeMedia(item, target, (p) => {
                 item.progress = Math.max(5, Math.floor(p * 100));
                 render();
             });
-        } else if (item.category === 'IMAGE') {
-            blob = await processImage(item.file, target);
-        } else if (item.category === 'DATA') {
-            blob = await processData(item.file, target);
-        }
-
-        item.result = blob;
-        item.status = 'done';
-        item.progress = 100;
+        } else if (item.category === 'IMAGE') { blob = await processImage(item.file, target); }
+        else if (item.category === 'DATA') { blob = await processData(item.file, target); }
+        item.result = blob; item.status = 'done'; item.progress = 100;
     } catch (err) {
-        item.status = 'error';
-        item.errorMsg = err.message;
+        item.status = 'error'; item.errorMsg = err.message;
     }
     render();
 }
 
-// Processing Engines
 async function processImage(file, target) {
     const ext = file.name.split('.').pop().toLowerCase();
     let source = file;
-
     if (ext === 'heic' || ext === 'heif') {
         const converted = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.8 });
         source = Array.isArray(converted) ? converted[0] : converted;
     }
-
     return new Promise((resolve, reject) => {
         const img = new Image();
         img.onload = () => {
             const canvas = document.getElementById('conversionCanvas');
             const ctx = canvas.getContext('2d');
-            canvas.width = img.width;
-            canvas.height = img.height;
+            canvas.width = img.width; canvas.height = img.height;
             ctx.drawImage(img, 0, 0);
             const mime = `image/${target === 'jpg' ? 'jpeg' : target}`;
-            canvas.toBlob(b => b ? resolve(b) : reject("Buffer fail"), mime, 0.9);
+            canvas.toBlob(b => b ? resolve(b) : reject("Fail"), mime, 0.9);
             URL.revokeObjectURL(img.src);
         };
         img.src = URL.createObjectURL(source);
@@ -238,9 +185,8 @@ async function transcodeMedia(item, target, onProgress) {
     ffmpeg.FS('writeFile', inName, await FFmpeg.fetchFile(item.file));
     await ffmpeg.run('-i', inName, outName);
     const data = ffmpeg.FS('readFile', outName);
-    ffmpeg.FS('unlink', inName);
-    ffmpeg.FS('unlink', outName);
-    const mimes = { 'mp4': 'video/mp4', 'webm': 'video/webm', 'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'gif': 'image/gif', 'mov': 'video/quicktime' };
+    ffmpeg.FS('unlink', inName); ffmpeg.FS('unlink', outName);
+    const mimes = { 'mp4': 'video/mp4', 'webm': 'video/webm', 'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'gif': 'image/gif' };
     return new Blob([data.buffer], { type: mimes[target] || 'application/octet-stream' });
 }
 
@@ -273,7 +219,6 @@ async function processData(file, target) {
     });
 }
 
-// Global UI management helpers
 window.remove = (id) => { state.queue = state.queue.filter(i => i.id !== id); render(); };
 window.updateFormat = (id, val) => { const i = state.queue.find(x => x.id === id); if(i) i.outputFormat = val; };
 window.download = (id) => {
@@ -291,45 +236,39 @@ function render() {
     const list = document.getElementById('fileList');
     const container = document.getElementById('queueContainer');
     const badge = document.getElementById('queueBadge');
-    
     if (!list || !container) return;
-
     container.classList.toggle('hidden', state.queue.length === 0);
     if(badge) badge.innerText = state.queue.length;
     list.innerHTML = '';
-
     state.queue.forEach(item => {
         const div = document.createElement('div');
         div.className = 'bg-white border border-slate-200 p-5 rounded-[1.5rem] shadow-sm flex flex-col gap-4 group transition-all hover:shadow-xl';
         const options = item.targets.map(t => `<option value="${t}" ${item.outputFormat === t ? 'selected' : ''}>.${t.toUpperCase()}</option>`).join('');
-
         div.innerHTML = `
             <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                 <div class="flex items-center gap-4 flex-1 truncate">
-                    <div class="w-12 h-12 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-400 group-hover:text-indigo-600 transition-colors">
+                    <div class="w-12 h-12 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-400 group-hover:text-indigo-600">
                         <i class="fas ${ENGINES[item.category]?.icon || 'fa-file'} text-xl"></i>
                     </div>
                     <div class="truncate">
-                        <h4 class="font-black text-sm text-slate-900 truncate" title="${item.name}">${item.name}</h4>
+                        <h4 class="font-black text-sm text-slate-900 truncate">${item.name}</h4>
                         <div class="flex items-center gap-2 mt-1">
                             <span class="category-tag cat-${item.category.toLowerCase()}">${item.category}</span>
                             <span class="text-[10px] font-black text-slate-300 uppercase">${item.size}</span>
                         </div>
                     </div>
                 </div>
-                <div class="flex items-center justify-between w-full md:w-auto gap-4">
+                <div class="flex items-center gap-4">
                     <div class="flex items-center gap-2 bg-slate-50 rounded-xl px-3 py-1.5 border border-slate-200">
-                        <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest">To</span>
-                        <select onchange="updateFormat('${item.id}', this.value)" class="bg-transparent text-xs font-black focus:outline-none cursor-pointer" ${item.status !== 'idle' ? 'disabled' : ''}>
+                        <select onchange="updateFormat('${item.id}', this.value)" class="bg-transparent text-xs font-black focus:outline-none">
                             ${options || '<option>N/A</option>'}
                         </select>
                     </div>
                     <div class="w-28">${renderAction(item)}</div>
-                    <button onclick="remove('${item.id}')" class="text-slate-200 hover:text-red-500 transition-colors"><i class="fas fa-times-circle text-lg"></i></button>
+                    <button onclick="remove('${item.id}')" class="text-slate-200 hover:text-red-500"><i class="fas fa-times-circle text-lg"></i></button>
                 </div>
             </div>
-            ${item.status === 'working' ? `<div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden shadow-inner"><div class="h-full bg-indigo-600 progress-bar-inner" style="width: ${item.progress}%"></div></div>` : ''}
-            ${item.status === 'error' ? `<div class="bg-red-50 text-[10px] text-red-600 font-black uppercase p-3 rounded-xl border border-red-100">${item.errorMsg}</div>` : ''}
+            ${item.status === 'working' ? `<div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden"><div class="h-full bg-indigo-600" style="width: ${item.progress}%"></div></div>` : ''}
         `;
         list.appendChild(div);
     });
@@ -338,18 +277,9 @@ function render() {
 function renderAction(item) {
     if (item.status === 'idle') return `<button onclick="runConversion('${item.id}')" class="w-full bg-slate-900 text-white text-[10px] py-2.5 rounded-xl font-black uppercase tracking-widest hover:bg-indigo-600 transition-all">Convert</button>`;
     if (item.status === 'working') return `<div class="loader mx-auto"></div>`;
-    if (item.status === 'done') return `<button onclick="download('${item.id}')" class="w-full bg-green-500 text-white text-[10px] py-2.5 rounded-xl font-black uppercase tracking-widest hover:bg-green-600 shadow-lg shadow-green-100 flex items-center justify-center gap-2"><i class="fas fa-download"></i> Save</button>`;
+    if (item.status === 'done') return `<button onclick="download('${item.id}')" class="w-full bg-green-500 text-white text-[10px] py-2.5 rounded-xl font-black uppercase tracking-widest hover:bg-green-600 flex items-center justify-center gap-2"><i class="fas fa-download"></i> Save</button>`;
     return `<span class="text-red-500 text-[10px] font-black uppercase">Failed</span>`;
 }
 
-// --- 5. INITIALIZATION ---
-function bootstrap() {
-    setupApp();
-    initFFmpeg();
-}
-
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', bootstrap);
-} else {
-    bootstrap();
-}
+function bootstrap() { setupApp(); initFFmpeg(); }
+if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', bootstrap); } else { bootstrap(); }
