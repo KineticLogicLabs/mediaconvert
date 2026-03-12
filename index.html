@@ -12,11 +12,11 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
+    
     <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
     
     <link rel="stylesheet" href="style.css">
     <style>
-        /* Smooth height transitions to prevent jumping */
         .expandable-section {
             transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
             overflow: hidden;
@@ -34,7 +34,21 @@
             max-height: 1000px;
             opacity: 1;
         }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
     </style>
+
+    <script>
+        // Check if Cross-Origin Isolation is active (required for FFmpeg)
+        window.addEventListener('load', () => {
+            if (!window.crossOriginIsolated) {
+                console.warn("Cross-Origin Isolation not active. FFmpeg might fail.");
+                // This will trigger the UI warning defined in your body
+                document.getElementById('securityWarning')?.classList.remove('hidden-zero-height');
+                document.getElementById('securityWarning')?.classList.add('visible-height');
+            }
+        });
+    </script>
 </head>
 <body class="bg-slate-50 text-slate-900 min-h-screen flex flex-col overflow-x-hidden">
 
@@ -62,12 +76,11 @@
             <p class="text-slate-500 font-medium">Every file stays in your browser. No server uploads.</p>
         </div>
 
-        <!-- Security Warning (Expandable) -->
-        <div id="securityWarning" class="expandable-section hidden-zero-height bg-red-50 border border-red-200 p-4 rounded-2xl flex gap-4 items-center">
-            <i class="fas fa-triangle-exclamation text-red-500 text-xl"></i>
+        <div id="securityWarning" class="expandable-section hidden-zero-height bg-amber-50 border border-amber-200 p-5 rounded-2xl flex gap-4 items-center mb-4">
+            <i class="fas fa-shield-virus text-amber-500 text-2xl"></i>
             <div class="flex-grow">
-                <h4 class="text-sm font-bold text-red-900 uppercase">Media Engine Restricted</h4>
-                <p class="text-xs text-red-700">Encoding requires a secure browser context. Refresh to repair.</p>
+                <h4 class="text-sm font-bold text-amber-900 uppercase tracking-tight">Security Isolation Required</h4>
+                <p class="text-xs text-amber-700">Compressed audio/video requires a secure worker. If you just uploaded the service worker, refresh twice.</p>
             </div>
         </div>
 
@@ -83,7 +96,6 @@
             </div>
         </section>
 
-        <!-- Pipeline Queue (Expandable) -->
         <section id="queueContainer" class="expandable-section hidden-zero-height space-y-6">
             <div class="flex items-center justify-between border-b border-slate-200 pb-4">
                 <div class="flex items-center gap-3">
@@ -98,7 +110,6 @@
             <div id="fileList" class="grid grid-cols-1 gap-4 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar"></div>
         </section>
 
-        <!-- Category Explorer -->
         <section class="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <button onclick="window.showFormatDetails('IMAGE')" class="bg-white p-8 rounded-[1.5rem] border border-slate-100 shadow-sm flex flex-col items-center hover:border-indigo-500 transition-all group">
                 <div class="w-14 h-14 bg-blue-50 text-blue-500 rounded-2xl flex items-center justify-center mb-4 group-hover:bg-blue-500 group-hover:text-white transition-all"><i class="fas fa-image"></i></div>
@@ -118,7 +129,6 @@
             </button>
         </section>
 
-        <!-- Detail Panel (Expandable) -->
         <div id="formatDetailPanel" class="expandable-section hidden-zero-height bg-white border border-slate-200 rounded-[2rem] p-8 shadow-2xl">
             <div class="flex justify-between items-center mb-6">
                 <div class="flex items-center gap-3">
@@ -144,7 +154,7 @@
         <div class="max-w-7xl mx-auto flex justify-between items-center">
             <div>
                 <p class="text-[11px] font-black text-slate-900 uppercase tracking-widest">&copy; 2026 Kinetic Logic Labs</p>
-                <p class="text-[10px] text-slate-400 font-bold uppercase mt-1">Version 2.0.7</p>
+                <p class="text-[10px] text-slate-400 font-bold uppercase mt-1">Version 2.1.0 (Isolation Enabled)</p>
             </div>
             <div class="flex gap-6 text-slate-400 text-xl items-center">
                 <a href="https://github.com/kineticlogiclabs" target="_blank" class="hover:text-indigo-600 transition-all"><i class="fab fa-github"></i></a>
@@ -154,6 +164,7 @@
     </footer>
 
     <canvas id="conversionCanvas" class="hidden"></canvas>
+    
     <script src="script.js"></script>
 </body>
 </html>
