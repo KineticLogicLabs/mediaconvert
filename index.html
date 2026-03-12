@@ -12,10 +12,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
-    
     <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
     
-    <link rel="stylesheet" href="style.css">
     <style>
         .expandable-section {
             transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
@@ -37,50 +35,32 @@
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
     </style>
-
-    <script>
-        // Check if Cross-Origin Isolation is active (required for FFmpeg)
-        window.addEventListener('load', () => {
-            if (!window.crossOriginIsolated) {
-                console.warn("Cross-Origin Isolation not active. FFmpeg might fail.");
-                // This will trigger the UI warning defined in your body
-                document.getElementById('securityWarning')?.classList.remove('hidden-zero-height');
-                document.getElementById('securityWarning')?.classList.add('visible-height');
-            }
-        });
-    </script>
 </head>
 <body class="bg-slate-50 text-slate-900 min-h-screen flex flex-col overflow-x-hidden">
 
     <nav class="w-full px-6 sm:px-12 py-4 sm:py-8 flex justify-between items-center">
         <div class="flex items-center gap-4">
-            <div class="w-12 h-12 sm:w-20 sm:h-20 flex items-center justify-center transition-transform hover:rotate-3">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="25 0 750 840" class="w-full h-full">
-                    <style>path { fill: #4f46e5; fill-rule: evenodd; }</style>
-                    <path d="M443.36,804.35l-32.5,18.39c-9.19,5.2-17.22,3.66-26.1-1.56l-212.56-124.94-97.59-57.79c-5.17-3.03-10.65-7.19-15.56-12.92-.19-.22-.37-.46-.54-.7h0c-.92-1.34-1.42-2.92-1.42-4.55l-.1-359.61c0-.62-.09-1.24-.22-1.85-1.5-7.05,1.23-13.41,7.53-17.22l99.7-60.38L386.48,50.15c5.7-3.36,12.79-5.44,18.55-2.69,12.37,5.91,22.82,11.89,34.74,18.9l212.4,124.99,81.93,49.64c4.41,2.67,7.38,9.18,7.44,14.09l.93,81.49.39,279.84c0,3.75-1.26,7.41-3.69,10.26-3.63,4.23-8.17,7.67-12.66,10.38l-42.13,25.48-241.02,141.81ZM712.56,611.04l.43-204.03.25-102.65-.93-35.51c-.15-5.63-2.78-9.47-7.96-12.52l-201.14-118.53-103.03-59.64c-6.09,2.49-10.74,4.61-16.62,8.08L86.78,261.48l-.45,197.89c-.5,6.61-.6,11.7-.13,18.06l.02,133.73,313.32,183.59,39.77-22.91,273.24-160.79Z M363.71,704.77l65.63-.45c5.94-.04,12.46-3.56,14.44-9.4l14.81-43.65,48.65-20.02,36.84,18.22c8.12,4.02,17.54,4.14,24.24-2.55l45.2-45.11c2.74-2.73,1.44-10.15-.17-13.44l-19.86-40.52,20.69-50.74,38.13-11.1c5.3-1.54,14.39-5.81,15.17-12.36,2.74-22.91,2.37-44.93.02-68.09-.44-4.32-7.88-9.82-11.71-11l-33.12-10.2c-5.91-1.82-9.6-5.96-11.94-11.58l-17.24-41.41c3.82-13.89,24.17-40.38,20.01-52.71-3.33-9.87-15.22-16.91-22.43-23.91l-23.8-23.14c-4.36-4.24-11.58-7.03-17.61-4.13l-41.81,20.13c-16.64-7.63-31.97-14.41-49.11-21.06l-14.09-41.33c-2.73-7.99-8.57-12.5-17.09-12.54l-56.05-.26c-8.79-.04-16.02,4.15-18.72,12.89l-12.73,41.18c-17.53,6.48-33.12,13.08-50.45,21.11l-35.51-18.24c-8.99-4.62-18.15-3.1-25.6,4.06-15.03,14.45-29.71,28.66-43.95,44.2-4.19,4.57.41,15.26,2.72,20.02l16.57,34.11-17.49,42.39c-2.43,5.89-4.17,9.27-10.75,11.15l-33.39,9.55c-6.74,1.93-12.02,7.16-12.3,14.71-.78,21.15-.88,41.18-.3,62.84.12,4.4,6.86,10.77,10.99,12.05l43.55,13.49c4.82,14.15,10.13,27.67,16.37,41.09,2.96,6.38,3.36,11.52.4,17.71l-16.64,34.79c-5.04,10.54,14.2,25.91,21.32,32.58l24.11,22.62c4.72,4.42,11.58,9.15,18.46,5.66l41.8-21.16,46.37,19.37c2.32.97,5.06,5.23,5.91,7.78l11.25,33.58c1.32,3.95,5.93,12.87,10.23,12.84Z M428.86,592.23c56.23-10.13,103.65-52.02,120.79-105.74,29.16-91.39-30.99-187.95-124.97-202.82-83.04-13.14-161.05,39.61-179.27,121.74-11.97,53.98,5.26,110.87,47.01,147.59,23.59,20.75,51.63,35.89,82.98,39.7,17.18,2.09,35.23,2.81,53.47-.47Z"/>
-                </svg>
+            <div class="w-12 h-12 sm:w-20 sm:h-20 flex items-center justify-center">
+                <i class="fas fa-layer-group text-indigo-600 text-4xl"></i>
             </div>
             <div>
                 <h1 class="text-xl sm:text-4xl font-black text-slate-900 leading-none">MediaConvert</h1>
                 <p class="text-[9px] sm:text-[12px] text-indigo-600 font-extrabold uppercase mt-1">Kinetic Logic Labs</p>
             </div>
         </div>
-        <div class="hidden sm:block">
-            <a href="https://kineticlogiclabs.github.io" target="_blank" class="bg-white border border-slate-200 text-slate-900 px-6 py-3 rounded-2xl font-black text-xs uppercase hover:bg-indigo-600 hover:text-white transition-all shadow-sm">Visit Main Site</a>
-        </div>
     </nav>
 
     <main class="flex-grow flex flex-col w-full max-w-6xl mx-auto px-6 py-4 md:py-8 gap-8">
         <div class="text-center md:text-left space-y-2">
             <h2 class="text-3xl md:text-5xl font-black text-slate-900 tracking-tight leading-tight">Privacy-First <span class="text-indigo-600">Processing.</span></h2>
-            <p class="text-slate-500 font-medium">Every file stays in your browser. No server uploads.</p>
+            <p class="text-slate-500 font-medium">No server uploads. Everything stays in your browser.</p>
         </div>
 
-        <div id="securityWarning" class="expandable-section hidden-zero-height bg-amber-50 border border-amber-200 p-5 rounded-2xl flex gap-4 items-center mb-4">
+        <div id="securityWarning" class="expandable-section hidden-zero-height bg-amber-50 border border-amber-200 p-5 rounded-2xl flex gap-4 items-center">
             <i class="fas fa-shield-virus text-amber-500 text-2xl"></i>
             <div class="flex-grow">
-                <h4 class="text-sm font-bold text-amber-900 uppercase tracking-tight">Security Isolation Required</h4>
-                <p class="text-xs text-amber-700">Compressed audio/video requires a secure worker. If you just uploaded the service worker, refresh twice.</p>
+                <h4 class="text-sm font-bold text-amber-900 uppercase">Advanced Encoding Blocked</h4>
+                <p class="text-xs text-amber-700">Compressed audio (MP3/AAC) requires a secure worker. Please <strong>refresh the page twice</strong> to enable the engine.</p>
             </div>
         </div>
 
@@ -89,8 +69,7 @@
             <div class="flex flex-col items-center pointer-events-none">
                 <div class="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-3xl flex items-center justify-center mb-6"><i class="fas fa-cloud-arrow-up text-3xl"></i></div>
                 <h3 class="text-2xl font-black text-slate-900">Drop your media here</h3>
-                <p class="text-sm text-slate-400 mb-8 font-medium italic">Zero uploads. 100% Local.</p>
-                <div class="pointer-events-auto">
+                <div class="pointer-events-auto mt-6">
                     <button id="selectFilesBtn" class="bg-[#111827] text-white px-10 py-4 rounded-2xl font-black text-sm uppercase hover:bg-indigo-600 transition-all shadow-xl">CHOOSE FILES</button>
                 </div>
             </div>
@@ -150,21 +129,11 @@
         </div>
     </main>
 
-    <footer class="mt-auto py-10 bg-white border-t border-slate-200 px-6 sm:px-12">
-        <div class="max-w-7xl mx-auto flex justify-between items-center">
-            <div>
-                <p class="text-[11px] font-black text-slate-900 uppercase tracking-widest">&copy; 2026 Kinetic Logic Labs</p>
-                <p class="text-[10px] text-slate-400 font-bold uppercase mt-1">Version 2.1.0 (Isolation Enabled)</p>
-            </div>
-            <div class="flex gap-6 text-slate-400 text-xl items-center">
-                <a href="https://github.com/kineticlogiclabs" target="_blank" class="hover:text-indigo-600 transition-all"><i class="fab fa-github"></i></a>
-                <i class="fas fa-shield-halved cursor-help" title="Private Local Processing"></i>
-            </div>
-        </div>
+    <footer class="mt-auto py-10 bg-white border-t border-slate-200 px-6 sm:px-12 text-center sm:text-left">
+        <p class="text-[11px] font-black text-slate-900 uppercase tracking-widest">&copy; 2026 Kinetic Logic Labs</p>
     </footer>
 
     <canvas id="conversionCanvas" class="hidden"></canvas>
-    
     <script src="script.js"></script>
 </body>
 </html>
