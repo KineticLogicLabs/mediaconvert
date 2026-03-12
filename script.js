@@ -1,6 +1,6 @@
 /**
  * MediaConvert Logic - Professional Multi-File Version
- * (c) 2026 Kinetic Logic Labs - v3.0 Robust Edition
+ * (c) 2026 Kinetic Logic Labs
  */
 
 // --- 1. GLOBAL UI HELPERS ---
@@ -8,6 +8,8 @@ let currentVisibleCategory = null;
 
 window.showFormatDetails = function(catKey) {
     const panel = document.getElementById('formatDetailPanel');
+    
+    // Toggle behavior: If the same category is clicked, hide it
     if (currentVisibleCategory === catKey) {
         window.hideFormatDetails();
         return;
@@ -16,13 +18,16 @@ window.showFormatDetails = function(catKey) {
     const config = ENGINES[catKey];
     if(!config || !panel) return;
 
-    document.getElementById('detailTitle').innerText = config.title;
+    const title = document.getElementById('detailTitle');
     const icon = document.getElementById('detailIcon');
+    const inputs = document.getElementById('inputFormats');
+    const outputs = document.getElementById('outputFormats');
+
+    title.innerText = config.title;
     icon.className = `w-12 h-12 rounded-xl flex items-center justify-center ${config.color}`;
     icon.innerHTML = `<i class="fas ${config.icon} text-xl"></i>`;
-    
-    document.getElementById('inputFormats').innerHTML = config.ext.map(f => `<span class="px-3 py-1 bg-slate-100 rounded-lg text-[10px] font-bold text-slate-500 uppercase">.${f}</span>`).join('');
-    document.getElementById('outputFormats').innerHTML = config.targets.map(f => `<span class="px-3 py-1 bg-indigo-50 rounded-lg text-[10px] font-bold text-indigo-600 uppercase">.${f}</span>`).join('');
+    inputs.innerHTML = config.ext.map(f => `<span class="px-3 py-1 bg-slate-100 rounded-lg text-[10px] font-bold text-slate-500 uppercase">.${f}</span>`).join('');
+    outputs.innerHTML = config.targets.map(f => `<span class="px-3 py-1 bg-indigo-50 rounded-lg text-[10px] font-bold text-indigo-600 uppercase">.${f}</span>`).join('');
     
     panel.classList.remove('hidden-zero-height');
     panel.classList.add('visible-height');
@@ -54,32 +59,50 @@ const state = { queue: [] };
 // --- 3. PROCESSING ENGINES ---
 async function initFFmpeg() {
     if (ffmpegLoaded) return true;
-    if (ffmpegLoading) return new Promise(r => {
-        const i = setInterval(() => { if(ffmpegLoaded){ clearInterval(i); r(true); }}, 100);
+    if (ffmpegLoading) return new Promise((resolve) => {
+        const check = setInterval(() => {
+            if (ffmpegLoaded) { clearInterval(check); resolve(true); }
+            if (!ffmpegLoading && !ffmpegLoaded) { clearInterval(check); resolve(false); }
+        }, 100);
     });
 
     ffmpegLoading = true;
-    
-    // Check for Cross-Origin Isolation (Required for FFmpeg WASM)
+    const warningEl = document.getElementById('securityWarning');
+
     if (typeof SharedArrayBuffer === 'undefined') {
         ffmpegLoading = false;
-        return false; 
+        showSecurityWarning(true);
+        return false;
     }
 
     try {
-        const { createFFmpeg } = FFmpeg;
-        ffmpeg = createFFmpeg({ 
-            log: false,
-            corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js'
-        });
+        if (!ffmpeg) {
+            ffmpeg = FFmpeg.createFFmpeg({ 
+                log: false,
+                corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js'
+            });
+        }
         await ffmpeg.load();
         ffmpegLoaded = true;
         ffmpegLoading = false;
+        showSecurityWarning(false);
         return true;
     } catch (e) {
         console.error("FFmpeg Load Fail:", e);
         ffmpegLoading = false;
+        showSecurityWarning(true);
         return false;
+    }
+}
+
+function showSecurityWarning(show) {
+    const warningEl = document.getElementById('securityWarning');
+    if (show) {
+        warningEl?.classList.remove('hidden-zero-height');
+        warningEl?.classList.add('visible-height');
+    } else {
+        warningEl?.classList.add('hidden-zero-height');
+        warningEl?.classList.remove('visible-height');
     }
 }
 
@@ -95,22 +118,18 @@ async function runConversion(id) {
         let blob;
         const target = item.outputFormat;
 
-        if (item.category === 'VIDEO' || item.category === 'AUDIO') {
+        // Route to specialized engines
+        if (item.category === 'VIDEO' || (item.category === 'AUDIO' && target !== 'wav')) {
             const ready = await initFFmpeg();
+            if (!ready) throw new Error("Browser security block: Engine cannot start.");
             
-            if (!ready) {
-                // FALLBACK: If FFmpeg is blocked, only WAV works
-                if (item.category === 'AUDIO' && target === 'wav') {
-                    blob = await processAudioNative(item.file);
-                } else {
-                    document.getElementById('securityWarning').classList.remove('hidden-zero-height');
-                    document.getElementById('securityWarning').classList.add('visible-height');
-                    throw new Error("Secure context required for this format.");
-                }
-            } else {
-                // Standard FFmpeg Path
-                blob = await transcodeMedia(item, target);
-            }
+            blob = await transcodeMedia(item, target, (p) => {
+                item.progress = Math.max(1, Math.floor(p * 100));
+                render();
+            });
+        } else if (item.category === 'AUDIO' && target === 'wav') {
+            // Native WAV path - 100% reliability, no security blocks
+            blob = await processAudioNative(item.file);
         } else if (item.category === 'IMAGE') {
             blob = await processImage(item.file, target);
         } else if (item.category === 'DATA') {
@@ -127,39 +146,6 @@ async function runConversion(id) {
     render();
 }
 
-async function transcodeMedia(item, target) {
-    const inName = `in_${item.id}`;
-    const outName = `out_${item.id}.${target}`;
-    
-    ffmpeg.setProgress(({ ratio }) => {
-        item.progress = Math.max(1, Math.floor(ratio * 100));
-        render();
-    });
-
-    ffmpeg.FS('writeFile', inName, await FFmpeg.fetchFile(item.file));
-    
-    const args = ['-i', inName];
-    if (item.category === 'AUDIO') {
-        // Strip video/cover art and pick first audio stream
-        args.push('-vn', '-map', '0:a:0');
-        const encoders = { 'mp3': 'libmp3lame', 'ogg': 'libvorbis', 'wav': 'pcm_s16le', 'aac': 'aac', 'm4a': 'aac', 'flac': 'flac' };
-        args.push('-c:a', encoders[target] || 'copy');
-    } else {
-        args.push('-preset', 'ultrafast', '-c:v', 'libx264', '-crf', '28', '-c:a', 'aac');
-    }
-    args.push(outName);
-
-    await ffmpeg.run(...args);
-    
-    const data = ffmpeg.FS('readFile', outName);
-    ffmpeg.FS('unlink', inName);
-    ffmpeg.FS('unlink', outName);
-    
-    const mimes = { 'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'ogg': 'audio/ogg', 'mp4': 'video/mp4', 'webm': 'video/webm' };
-    return new Blob([data.buffer], { type: mimes[target] || 'application/octet-stream' });
-}
-
-// WAV Fallback for non-secure contexts
 async function processAudioNative(file) {
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     const arrayBuffer = await file.arrayBuffer();
@@ -168,7 +154,8 @@ async function processAudioNative(file) {
     const length = audioBuffer.length * numOfChan * 2 + 44;
     const buffer = new ArrayBuffer(length);
     const view = new DataView(buffer);
-    let pos = 0;
+    const channels = [];
+    let offset = 0; let pos = 0;
 
     const setUint32 = (d) => { view.setUint32(pos, d, true); pos += 4; };
     const setUint16 = (d) => { view.setUint16(pos, d, true); pos += 2; };
@@ -178,29 +165,61 @@ async function processAudioNative(file) {
     setUint32(audioBuffer.sampleRate * 2 * numOfChan); setUint16(numOfChan * 2);
     setUint16(16); setUint32(0x61746164); setUint32(length - pos - 4);
 
-    for (let i = 0; i < audioBuffer.length; i++) {
-        for (let channel = 0; channel < numOfChan; channel++) {
-            let sample = audioBuffer.getChannelData(channel)[i];
-            sample = Math.max(-1, Math.min(1, sample));
+    for(let i=0; i<numOfChan; i++) channels.push(audioBuffer.getChannelData(i));
+    while(pos < length) {
+        for(let i=0; i<numOfChan; i++) {
+            let sample = Math.max(-1, Math.min(1, channels[i][offset]));
             view.setInt16(pos, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
             pos += 2;
         }
+        offset++;
     }
     return new Blob([buffer], { type: 'audio/wav' });
 }
 
+async function transcodeMedia(item, target, onProgress) {
+    const inName = `in_${item.id}_${item.name}`;
+    const outName = `out_${item.id}.${target}`;
+    ffmpeg.setProgress(({ ratio }) => onProgress(ratio));
+    ffmpeg.FS('writeFile', inName, await FFmpeg.fetchFile(item.file));
+    
+    if (item.category === 'VIDEO') {
+        // Fast transcode for browsers
+        await ffmpeg.run('-i', inName, '-preset', 'ultrafast', '-c:v', 'libx264', '-crf', '28', outName);
+    } else {
+        // Audio transcode: remove video streams to prevent errors with album art
+        await ffmpeg.run('-i', inName, '-vn', '-acodec', target === 'mp3' ? 'libmp3lame' : (target === 'ogg' ? 'libvorbis' : 'copy'), outName);
+    }
+    
+    const data = ffmpeg.FS('readFile', outName);
+    ffmpeg.FS('unlink', inName); ffmpeg.FS('unlink', outName);
+    const mimes = { 
+        'mp4': 'video/mp4', 'webm': 'video/webm', 'mov': 'video/quicktime', 'avi': 'video/x-msvideo', 'mkv': 'video/x-matroska',
+        'mp3': 'audio/mpeg', 'ogg': 'audio/ogg', 'aac': 'audio/aac', 'flac': 'audio/flac', 'm4a': 'audio/mp4', 'gif': 'image/gif' 
+    };
+    return new Blob([data.buffer], { type: mimes[target] || 'application/octet-stream' });
+}
+
 async function processImage(file, target) {
-    const source = (file.name.match(/\.(heic|heif)$/i)) ? await heic2any({ blob: file, toType: "image/jpeg" }) : file;
-    return new Promise((resolve) => {
+    const ext = file.name.split('.').pop().toLowerCase();
+    let source = file;
+    if (ext === 'heic' || ext === 'heif') {
+        const converted = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.8 });
+        source = Array.isArray(converted) ? converted[0] : converted;
+    }
+    return new Promise((resolve, reject) => {
         const img = new Image();
         img.onload = () => {
             const canvas = document.getElementById('conversionCanvas');
             const ctx = canvas.getContext('2d');
             canvas.width = img.width; canvas.height = img.height;
             ctx.drawImage(img, 0, 0);
-            canvas.toBlob(b => resolve(b), `image/${target === 'jpg' ? 'jpeg' : target}`, 0.9);
+            const mime = `image/${target === 'jpg' ? 'jpeg' : target}`;
+            canvas.toBlob(b => b ? resolve(b) : reject("Processing error"), mime, 0.9);
+            URL.revokeObjectURL(img.src);
         };
-        img.src = URL.createObjectURL(Array.isArray(source) ? source[0] : source);
+        img.onerror = () => reject("Image load failure");
+        img.src = URL.createObjectURL(source);
     });
 }
 
@@ -212,14 +231,33 @@ async function processData(file, target) {
         doc.text(doc.splitTextToSize(text, 180), 10, 10);
         return doc.output('blob');
     }
-    return file;
+    return file; 
 }
 
-// --- 4. APP LOGIC ---
+// --- 4. APP SETUP & RENDERING ---
+function setupApp() {
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const selectFilesBtn = document.getElementById('selectFilesBtn');
+    const convertAllBtn = document.getElementById('convertAllBtn');
+    const clearBtn = document.getElementById('clearBtn');
+
+    selectFilesBtn?.addEventListener('click', (e) => { e.stopPropagation(); fileInput.click(); });
+    dropZone?.addEventListener('click', (e) => { if (e.target.tagName !== 'BUTTON') fileInput.click(); });
+    fileInput?.addEventListener('change', (e) => { if (e.target.files.length > 0) { handleFiles(e.target.files); fileInput.value = ''; } });
+    dropZone?.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('bg-indigo-50/20'); });
+    dropZone?.addEventListener('dragleave', () => dropZone.classList.remove('bg-indigo-50/20'));
+    dropZone?.addEventListener('drop', (e) => { e.preventDefault(); dropZone.classList.remove('bg-indigo-50/20'); handleFiles(e.dataTransfer.files); });
+
+    if (clearBtn) clearBtn.onclick = () => { state.queue = []; render(); };
+    if (convertAllBtn) convertAllBtn.onclick = async () => { for (let item of state.queue) { if (item.status === 'idle') await runConversion(item.id); } };
+}
+
 function handleFiles(files) {
     Array.from(files).forEach(file => {
         const ext = file.name.split('.').pop().toLowerCase();
-        let category = 'UNKNOWN', targets = [];
+        let category = 'UNKNOWN';
+        let targets = [];
         for (const [key, val] of Object.entries(ENGINES)) {
             if (val.ext.includes(ext)) { category = key; targets = val.targets; break; }
         }
@@ -235,55 +273,74 @@ function handleFiles(files) {
     render();
 }
 
-window.remove = (id) => { state.queue = state.queue.filter(i => i.id !== id); render(); };
+window.remove = (id) => { 
+    state.queue = state.queue.filter(i => i.id !== id); 
+    render(); 
+};
+
 window.updateFormat = (id, val) => { 
-    const item = state.queue.find(x => x.id === id); 
-    if(item) { item.outputFormat = val; item.status = 'idle'; render(); } 
+    const i = state.queue.find(x => x.id === id); 
+    if(i) {
+        i.outputFormat = val;
+        i.status = 'idle'; i.result = null; i.progress = 0;
+        render();
+    }
 };
 
 window.download = (id) => {
     const item = state.queue.find(i => i.id === id);
-    if (!item?.result) return;
+    if (!item || !item.result) return;
     const url = URL.createObjectURL(item.result);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${item.name.split('.')[0]}.${item.outputFormat}`;
+    const base = item.name.substring(0, item.name.lastIndexOf('.')) || item.name;
+    a.download = `${base}.${item.outputFormat}`;
     a.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 200);
 };
 
 function render() {
     const list = document.getElementById('fileList');
     const container = document.getElementById('queueContainer');
     const badge = document.getElementById('queueBadge');
+    if (!list || !container) return;
     
-    if (state.queue.length > 0) {
-        container.classList.remove('hidden-zero-height');
-        container.classList.add('visible-height');
-    } else {
+    // Manage Global Warning Visibility
+    const hasErrors = state.queue.some(item => item.status === 'error');
+    if (!hasErrors) {
+        showSecurityWarning(false);
+    }
+
+    // Manage Pipeline Visibility
+    if (state.queue.length === 0) {
         container.classList.add('hidden-zero-height');
         container.classList.remove('visible-height');
+    } else {
+        container.classList.remove('hidden-zero-height');
+        container.classList.add('visible-height');
     }
 
     if(badge) badge.innerText = state.queue.length;
-    list.innerHTML = state.queue.map(item => `
-        <div class="bg-white border border-slate-200 p-5 rounded-3xl shadow-sm flex flex-col gap-4">
+    list.innerHTML = '';
+
+    state.queue.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'bg-white border border-slate-200 p-5 rounded-3xl shadow-sm flex flex-col gap-4 animate-in fade-in slide-in-from-bottom-2 duration-300';
+        div.innerHTML = `
             <div class="flex items-center justify-between gap-4">
                 <div class="flex items-center gap-4 truncate">
-                    <div class="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400">
-                        <i class="fas ${ENGINES[item.category]?.icon || 'fa-file'}"></i>
-                    </div>
+                    <div class="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400"><i class="fas ${ENGINES[item.category]?.icon || 'fa-file'}"></i></div>
                     <div class="truncate">
                         <h4 class="font-bold text-sm text-slate-900 truncate">${item.name}</h4>
                         <span class="text-[10px] text-slate-400 uppercase font-black">${item.size}</span>
                     </div>
                 </div>
                 <div class="flex items-center gap-2">
-                    <select onchange="window.updateFormat('${item.id}', this.value)" class="text-xs font-bold bg-slate-50 p-1 rounded-lg border">
+                    <select onchange="window.updateFormat('${item.id}', this.value)" class="text-xs font-bold bg-slate-50 p-1 rounded-lg border focus:outline-none">
                         ${item.targets.map(t => `<option value="${t}" ${item.outputFormat === t ? 'selected' : ''}>.${t.toUpperCase()}</option>`).join('')}
                     </select>
                     <div class="w-24">${renderAction(item)}</div>
-                    <button onclick="window.remove('${item.id}')" class="text-slate-300 hover:text-red-500"><i class="fas fa-times-circle text-lg"></i></button>
+                    <button onclick="window.remove('${item.id}')" class="text-slate-300 hover:text-red-500 transition-colors"><i class="fas fa-times-circle text-lg"></i></button>
                 </div>
             </div>
             ${item.status === 'working' ? `
@@ -295,28 +352,16 @@ function render() {
                 </div>
             ` : ''}
             ${item.status === 'error' ? `<p class="text-[10px] text-red-500 font-bold uppercase tracking-tight">${item.errorMsg}</p>` : ''}
-        </div>
-    `).join('');
+        `;
+        list.appendChild(div);
+    });
 }
 
 function renderAction(item) {
-    if (item.status === 'idle') return `<button onclick="runConversion('${item.id}')" class="w-full bg-slate-900 text-white text-[10px] py-2 rounded-xl font-bold uppercase hover:bg-indigo-600">Convert</button>`;
+    if (item.status === 'idle') return `<button onclick="runConversion('${item.id}')" class="w-full bg-slate-900 text-white text-[10px] py-2 rounded-xl font-bold uppercase hover:bg-indigo-600 transition-all">Convert</button>`;
     if (item.status === 'working') return `<div class="flex justify-center"><div class="animate-spin rounded-full h-4 w-4 border-2 border-indigo-600 border-t-transparent"></div></div>`;
-    if (item.status === 'done') return `<button onclick="window.download('${item.id}')" class="w-full bg-green-500 text-white text-[10px] py-2 rounded-xl font-bold uppercase hover:bg-green-600">Save</button>`;
+    if (item.status === 'done') return `<button onclick="window.download('${item.id}')" class="w-full bg-green-500 text-white text-[10px] py-2 rounded-xl font-bold uppercase hover:bg-green-600 transition-all">Save</button>`;
     return `<span class="text-red-500 text-[10px] font-bold">Error</span>`;
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-    const fileInput = document.getElementById('fileInput');
-    const selectBtn = document.getElementById('selectFilesBtn');
-    const dropZone = document.getElementById('dropZone');
-
-    selectBtn.onclick = () => fileInput.click();
-    fileInput.onchange = (e) => handleFiles(e.target.files);
-    dropZone.ondragover = (e) => { e.preventDefault(); dropZone.classList.add('bg-indigo-50/20'); };
-    dropZone.ondrop = (e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); };
-    document.getElementById('convertAllBtn').onclick = async () => {
-        for(let item of state.queue) if(item.status === 'idle') await runConversion(item.id);
-    };
-    document.getElementById('clearBtn').onclick = () => { state.queue = []; render(); };
-});
+document.addEventListener('DOMContentLoaded', setupApp);
