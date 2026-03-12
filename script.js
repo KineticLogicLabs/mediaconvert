@@ -9,19 +9,19 @@ let currentVisibleCategory = null;
 window.showFormatDetails = function(catKey) {
     const panel = document.getElementById('formatDetailPanel');
     
+    // Toggle behavior: If the same category is clicked, hide it
     if (currentVisibleCategory === catKey) {
         window.hideFormatDetails();
         return;
     }
 
     const config = ENGINES[catKey];
-    if(!config) return;
+    if(!config || !panel) return;
 
     const title = document.getElementById('detailTitle');
     const icon = document.getElementById('detailIcon');
     const inputs = document.getElementById('inputFormats');
     const outputs = document.getElementById('outputFormats');
-    if (!panel) return;
 
     title.innerText = config.title;
     icon.className = `w-12 h-12 rounded-xl flex items-center justify-center ${config.color}`;
@@ -29,23 +29,26 @@ window.showFormatDetails = function(catKey) {
     inputs.innerHTML = config.ext.map(f => `<span class="px-3 py-1 bg-slate-100 rounded-lg text-[10px] font-bold text-slate-500 uppercase">.${f}</span>`).join('');
     outputs.innerHTML = config.targets.map(f => `<span class="px-3 py-1 bg-indigo-50 rounded-lg text-[10px] font-bold text-indigo-600 uppercase">.${f}</span>`).join('');
     
-    panel.classList.remove('hidden');
+    panel.classList.remove('hidden-zero-height');
+    panel.classList.add('visible-height');
     currentVisibleCategory = catKey;
-    panel.scrollIntoView({ behavior: 'smooth', block: 'end' });
 };
 
 window.hideFormatDetails = function() {
     const panel = document.getElementById('formatDetailPanel');
-    if (panel) panel.classList.add('hidden');
+    if (panel) {
+        panel.classList.add('hidden-zero-height');
+        panel.classList.remove('visible-height');
+    }
     currentVisibleCategory = null;
 };
 
 // --- 2. CONFIGURATION ---
 const ENGINES = {
-    IMAGE: { title: "Images", ext: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'ico', 'heic', 'heif', 'tiff', 'svg', 'avif'], targets: ['png', 'jpg', 'webp', 'bmp', 'ico'], icon: 'fa-image', color: 'bg-blue-50 text-blue-500' },
-    VIDEO: { title: "Videos", ext: ['mp4', 'webm', 'mov', 'avi', 'mkv', 'flv', 'wmv', '3gp', 'ogv', 'mpeg', 'ts'], targets: ['mp4', 'webm', 'gif'], icon: 'fa-video', color: 'bg-rose-50 text-rose-500' },
-    AUDIO: { title: "Audio", ext: ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac'], targets: ['mp3', 'wav', 'ogg'], icon: 'fa-music', color: 'bg-purple-50 text-purple-500' },
-    DATA: { title: "Data & Docs", ext: ['xlsx', 'csv', 'json', 'txt', 'md', 'pdf'], targets: ['pdf', 'xlsx', 'csv', 'json', 'txt'], icon: 'fa-file-code', color: 'bg-emerald-50 text-emerald-500' }
+    IMAGE: { title: "Images", ext: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'ico', 'heic', 'heif', 'tiff', 'svg', 'avif'], targets: ['png', 'jpg', 'webp', 'bmp', 'ico', 'tiff'], icon: 'fa-image', color: 'bg-blue-50 text-blue-500' },
+    VIDEO: { title: "Videos", ext: ['mp4', 'webm', 'mov', 'avi', 'mkv', 'flv', 'wmv', '3gp', 'ogv', 'mpeg', 'ts'], targets: ['mp4', 'webm', 'mov', 'avi', 'mkv', 'gif'], icon: 'fa-video', color: 'bg-rose-50 text-rose-500' },
+    AUDIO: { title: "Audio", ext: ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'wma', 'aiff', 'opus'], targets: ['mp3', 'wav', 'ogg', 'aac', 'flac', 'm4a'], icon: 'fa-music', color: 'bg-purple-50 text-purple-500' },
+    DATA: { title: "Data & Docs", ext: ['xlsx', 'csv', 'json', 'txt', 'md', 'pdf', 'html', 'xml'], targets: ['pdf', 'xlsx', 'csv', 'json', 'txt', 'md', 'html'], icon: 'fa-file-code', color: 'bg-emerald-50 text-emerald-500' }
 };
 
 let ffmpeg = null;
@@ -53,42 +56,28 @@ let ffmpegLoaded = false;
 const state = { queue: [] };
 
 // --- 3. PROCESSING ENGINES ---
-
-/**
- * Enhanced FFmpeg Initialization
- */
 async function initFFmpeg() {
     if (ffmpegLoaded) return true;
     const warningEl = document.getElementById('securityWarning');
 
-    // SharedArrayBuffer is the "Full Power" indicator
     if (typeof SharedArrayBuffer === 'undefined') {
-        warningEl?.classList.remove('hidden');
-        // Add a button to the warning to try a hard reload
-        if (warningEl && !warningEl.querySelector('.reload-btn')) {
-            const btn = document.createElement('button');
-            btn.className = 'reload-btn ml-auto bg-red-600 text-white px-3 py-1 rounded-lg text-[10px] font-bold uppercase';
-            btn.innerText = 'Repair Engine';
-            btn.onclick = () => window.location.reload();
-            warningEl.appendChild(btn);
-        }
+        warningEl?.classList.remove('hidden-zero-height');
+        warningEl?.classList.add('visible-height');
         return false;
     }
 
     try {
         if (!ffmpeg) {
-            ffmpeg = FFmpeg.createFFmpeg({ 
-                log: true,
-                corePath: 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js'
-            });
+            ffmpeg = FFmpeg.createFFmpeg({ log: false });
         }
         await ffmpeg.load();
         ffmpegLoaded = true;
-        warningEl?.classList.add('hidden');
+        warningEl?.classList.add('hidden-zero-height');
+        warningEl?.classList.remove('visible-height');
         return true;
     } catch (e) {
-        console.error("FFmpeg Core failed:", e);
-        warningEl?.classList.remove('hidden');
+        warningEl?.classList.remove('hidden-zero-height');
+        warningEl?.classList.add('visible-height');
         return false;
     }
 }
@@ -98,20 +87,19 @@ async function runConversion(id) {
     if (!item) return;
 
     item.status = 'working';
-    item.progress = 10;
+    item.progress = 1;
     render();
 
     try {
         let blob;
         const target = item.outputFormat;
 
-        // Video and non-WAV audio require the Restricted Engine
         if (item.category === 'VIDEO' || (item.category === 'AUDIO' && target !== 'wav')) {
             const ready = await initFFmpeg();
-            if (!ready) throw new Error("Security block: Media Engine cannot start. Refresh the page.");
+            if (!ready) throw new Error("Security block: Media engine restricted.");
             
             blob = await transcodeMedia(item, target, (p) => {
-                item.progress = Math.max(10, Math.floor(p * 100));
+                item.progress = Math.max(1, Math.floor(p * 100));
                 render();
             });
         } else if (item.category === 'AUDIO' && target === 'wav') {
@@ -136,14 +124,12 @@ async function processAudioNative(file) {
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     const arrayBuffer = await file.arrayBuffer();
     const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-    
     const numOfChan = audioBuffer.numberOfChannels;
     const length = audioBuffer.length * numOfChan * 2 + 44;
     const buffer = new ArrayBuffer(length);
     const view = new DataView(buffer);
     const channels = [];
-    let offset = 0;
-    let pos = 0;
+    let offset = 0; let pos = 0;
 
     const setUint32 = (d) => { view.setUint32(pos, d, true); pos += 4; };
     const setUint16 = (d) => { view.setUint16(pos, d, true); pos += 2; };
@@ -168,29 +154,20 @@ async function processAudioNative(file) {
 async function transcodeMedia(item, target, onProgress) {
     const inName = `in_${item.id}_${item.name}`;
     const outName = `out_${item.id}.${target}`;
-    
-    ffmpeg.setProgress(({ ratio }) => {
-        if (ratio >= 0 && ratio <= 1) onProgress(ratio);
-    });
-
+    ffmpeg.setProgress(({ ratio }) => onProgress(ratio));
     ffmpeg.FS('writeFile', inName, await FFmpeg.fetchFile(item.file));
     
-    // Command differs slightly for video vs audio
     if (item.category === 'VIDEO') {
-        // Fast transcode for video
         await ffmpeg.run('-i', inName, '-preset', 'ultrafast', outName);
     } else {
-        // Audio transcode without video track
-        await ffmpeg.run('-i', inName, '-vn', outName);
+        await ffmpeg.run('-i', inName, '-vn', '-acodec', target === 'mp3' ? 'libmp3lame' : (target === 'ogg' ? 'libvorbis' : 'copy'), outName);
     }
     
     const data = ffmpeg.FS('readFile', outName);
-    ffmpeg.FS('unlink', inName);
-    ffmpeg.FS('unlink', outName);
-    
+    ffmpeg.FS('unlink', inName); ffmpeg.FS('unlink', outName);
     const mimes = { 
-        'mp4': 'video/mp4', 'webm': 'video/webm', 'gif': 'image/gif', 
-        'mp3': 'audio/mpeg', 'ogg': 'audio/ogg' 
+        'mp4': 'video/mp4', 'webm': 'video/webm', 'mov': 'video/quicktime', 'avi': 'video/x-msvideo', 'mkv': 'video/x-matroska',
+        'mp3': 'audio/mpeg', 'ogg': 'audio/ogg', 'aac': 'audio/aac', 'flac': 'audio/flac', 'm4a': 'audio/mp4', 'gif': 'image/gif' 
     };
     return new Blob([data.buffer], { type: mimes[target] || 'application/octet-stream' });
 }
@@ -277,9 +254,7 @@ window.updateFormat = (id, val) => {
     const i = state.queue.find(x => x.id === id); 
     if(i) {
         i.outputFormat = val;
-        i.status = 'idle';
-        i.result = null;
-        i.progress = 0;
+        i.status = 'idle'; i.result = null; i.progress = 0;
         render();
     }
 };
@@ -290,8 +265,7 @@ window.download = (id) => {
     const url = URL.createObjectURL(item.result);
     const a = document.createElement('a');
     a.href = url;
-    const base = item.name.substring(0, item.name.lastIndexOf('.')) || item.name;
-    a.download = `${base}.${item.outputFormat}`;
+    a.download = `${item.name.split('.')[0]}.${item.outputFormat}`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 200);
 };
@@ -301,16 +275,22 @@ function render() {
     const container = document.getElementById('queueContainer');
     const badge = document.getElementById('queueBadge');
     const warningEl = document.getElementById('securityWarning');
-
     if (!list || !container) return;
     
-    // Auto-hide warning if errors are gone
     const hasErrors = state.queue.some(item => item.status === 'error');
     if (!hasErrors && typeof SharedArrayBuffer !== 'undefined') {
-        warningEl?.classList.add('hidden');
+        warningEl?.classList.add('hidden-zero-height');
+        warningEl?.classList.remove('visible-height');
     }
 
-    container.classList.toggle('hidden', state.queue.length === 0);
+    if (state.queue.length === 0) {
+        container.classList.add('hidden-zero-height');
+        container.classList.remove('visible-height');
+    } else {
+        container.classList.remove('hidden-zero-height');
+        container.classList.add('visible-height');
+    }
+
     if(badge) badge.innerText = state.queue.length;
     list.innerHTML = '';
 
@@ -320,9 +300,7 @@ function render() {
         div.innerHTML = `
             <div class="flex items-center justify-between gap-4">
                 <div class="flex items-center gap-4 truncate">
-                    <div class="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400">
-                        <i class="fas ${ENGINES[item.category]?.icon || 'fa-file'}"></i>
-                    </div>
+                    <div class="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400"><i class="fas ${ENGINES[item.category]?.icon || 'fa-file'}"></i></div>
                     <div class="truncate">
                         <h4 class="font-bold text-sm text-slate-900 truncate">${item.name}</h4>
                         <span class="text-[10px] text-slate-400 uppercase font-black">${item.size}</span>
@@ -333,13 +311,18 @@ function render() {
                         ${item.targets.map(t => `<option value="${t}" ${item.outputFormat === t ? 'selected' : ''}>.${t.toUpperCase()}</option>`).join('')}
                     </select>
                     <div class="w-24">${renderAction(item)}</div>
-                    <button onclick="window.remove('${item.id}')" class="text-slate-300 hover:text-red-500 transition-colors">
-                        <i class="fas fa-times-circle text-lg"></i>
-                    </button>
+                    <button onclick="window.remove('${item.id}')" class="text-slate-300 hover:text-red-500 transition-colors"><i class="fas fa-times-circle text-lg"></i></button>
                 </div>
             </div>
-            ${item.status === 'working' ? `<div class="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden"><div class="h-full bg-indigo-600 transition-all duration-300" style="width: ${item.progress}%"></div></div>` : ''}
-            ${item.status === 'error' ? `<p class="text-[10px] text-red-500 font-bold uppercase tracking-tight">${item.errorMsg}</p>` : ''}
+            ${item.status === 'working' ? `
+                <div class="flex items-center gap-3">
+                    <div class="flex-grow bg-slate-100 h-2 rounded-full overflow-hidden">
+                        <div class="h-full bg-indigo-600 transition-all duration-300" style="width: ${item.progress}%"></div>
+                    </div>
+                    <span class="text-[10px] font-black text-indigo-600 w-8 text-right">${item.progress}%</span>
+                </div>
+            ` : ''}
+            ${item.status === 'error' ? `<p class="text-[10px] text-red-500 font-bold uppercase">${item.errorMsg}</p>` : ''}
         `;
         list.appendChild(div);
     });
