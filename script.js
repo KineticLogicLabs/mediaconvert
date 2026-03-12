@@ -4,10 +4,20 @@
  */
 
 // --- 1. GLOBAL UI HELPERS ---
+let currentVisibleCategory = null;
+
 window.showFormatDetails = function(catKey) {
+    const panel = document.getElementById('formatDetailPanel');
+    
+    // Toggle behavior: If the same category is clicked, hide it
+    if (currentVisibleCategory === catKey) {
+        window.hideFormatDetails();
+        return;
+    }
+
     const config = ENGINES[catKey];
     if(!config) return;
-    const panel = document.getElementById('formatDetailPanel');
+
     const title = document.getElementById('detailTitle');
     const icon = document.getElementById('detailIcon');
     const inputs = document.getElementById('inputFormats');
@@ -21,11 +31,13 @@ window.showFormatDetails = function(catKey) {
     outputs.innerHTML = config.targets.map(f => `<span class="px-3 py-1 bg-indigo-50 rounded-lg text-[10px] font-bold text-indigo-600 uppercase">.${f}</span>`).join('');
     
     panel.classList.remove('hidden');
+    currentVisibleCategory = catKey;
     panel.scrollIntoView({ behavior: 'smooth', block: 'end' });
 };
 
 window.hideFormatDetails = function() {
     document.getElementById('formatDetailPanel')?.classList.add('hidden');
+    currentVisibleCategory = null;
 };
 
 // --- 2. CONFIGURATION ---
@@ -219,8 +231,23 @@ function handleFiles(files) {
     render();
 }
 
-window.remove = (id) => { state.queue = state.queue.filter(i => i.id !== id); render(); };
-window.updateFormat = (id, val) => { const i = state.queue.find(x => x.id === id); if(i) i.outputFormat = val; };
+window.remove = (id) => { 
+    state.queue = state.queue.filter(i => i.id !== id); 
+    render(); 
+};
+
+window.updateFormat = (id, val) => { 
+    const i = state.queue.find(x => x.id === id); 
+    if(i) {
+        i.outputFormat = val;
+        // If the format changes after conversion, reset status so user has to re-convert
+        i.status = 'idle';
+        i.result = null;
+        i.progress = 0;
+        render();
+    }
+};
+
 window.download = (id) => {
     const item = state.queue.find(i => i.id === id);
     if (!item || !item.result) return;
@@ -236,10 +263,20 @@ function render() {
     const list = document.getElementById('fileList');
     const container = document.getElementById('queueContainer');
     const badge = document.getElementById('queueBadge');
+    const warningEl = document.getElementById('securityWarning');
+
     if (!list || !container) return;
+    
+    // Hide warning if no errors exist in the queue
+    const hasErrors = state.queue.some(item => item.status === 'error');
+    if (!hasErrors) {
+        warningEl?.classList.add('hidden');
+    }
+
     container.classList.toggle('hidden', state.queue.length === 0);
     if(badge) badge.innerText = state.queue.length;
     list.innerHTML = '';
+
     state.queue.forEach(item => {
         const div = document.createElement('div');
         div.className = 'bg-white border border-slate-200 p-5 rounded-3xl shadow-sm flex flex-col gap-4 animate-in fade-in slide-in-from-bottom-2 duration-300';
@@ -257,20 +294,20 @@ function render() {
                         ${item.targets.map(t => `<option value="${t}" ${item.outputFormat === t ? 'selected' : ''}>.${t.toUpperCase()}</option>`).join('')}
                     </select>
                     <div class="w-24">${renderAction(item)}</div>
-                    <button onclick="window.remove('${item.id}')" class="text-slate-300 hover:text-red-500"><i class="fas fa-times"></i></button>
+                    <button onclick="window.remove('${item.id}')" class="text-slate-300 hover:text-red-500 transition-colors"><i class="fas fa-times"></i></button>
                 </div>
             </div>
             ${item.status === 'working' ? `<div class="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden"><div class="h-full bg-indigo-600 transition-all duration-300" style="width: ${item.progress}%"></div></div>` : ''}
-            ${item.status === 'error' ? `<p class="text-[10px] text-red-500 font-bold uppercase">${item.errorMsg}</p>` : ''}
+            ${item.status === 'error' ? `<p class="text-[10px] text-red-500 font-bold uppercase tracking-tight">${item.errorMsg}</p>` : ''}
         `;
         list.appendChild(div);
     });
 }
 
 function renderAction(item) {
-    if (item.status === 'idle') return `<button onclick="runConversion('${item.id}')" class="w-full bg-slate-900 text-white text-[10px] py-2 rounded-xl font-bold uppercase">Convert</button>`;
+    if (item.status === 'idle') return `<button onclick="runConversion('${item.id}')" class="w-full bg-slate-900 text-white text-[10px] py-2 rounded-xl font-bold uppercase hover:bg-indigo-600 transition-all">Convert</button>`;
     if (item.status === 'working') return `<div class="flex justify-center"><div class="animate-spin rounded-full h-4 w-4 border-2 border-indigo-600 border-t-transparent"></div></div>`;
-    if (item.status === 'done') return `<button onclick="window.download('${item.id}')" class="w-full bg-green-500 text-white text-[10px] py-2 rounded-xl font-bold uppercase">Save</button>`;
+    if (item.status === 'done') return `<button onclick="window.download('${item.id}')" class="w-full bg-green-500 text-white text-[10px] py-2 rounded-xl font-bold uppercase hover:bg-green-600 transition-all">Save</button>`;
     return `<span class="text-red-500 text-[10px] font-bold">Error</span>`;
 }
 
