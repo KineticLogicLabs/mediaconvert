@@ -68,156 +68,67 @@ const ENGINES = {
     }
 };
 
-let ffmpeg = null;
-let ffmpegLoaded = false;
-let ffmpegLoading = false;
 const state = { queue: [] };
 
-// --- 3. THE "GUARANTEED" PROCESSING ENGINE ---
+// --- 3. THE "GUARANTEED" HUGGING FACE ENGINE ---
 
-async function initFFmpeg() {
-    if (ffmpegLoaded) return true;
-    if (ffmpegLoading) return new Promise(r => {
-        const i = setInterval(() => { if(ffmpegLoaded){clearInterval(i);r(true)} if(!ffmpegLoading){clearInterval(i);r(false)} }, 100);
-    });
-
-    ffmpegLoading = true;
-    const warningEl = document.getElementById('securityWarning');
-
-    // DETECT SECURITY RESTRICTION
-    const isRestricted = typeof SharedArrayBuffer === 'undefined';
-    
-    // Select the correct core: Standard (Fast) or Single-Threaded (Compatible)
-    // ST core works everywhere, even without COOP/COEP headers
-    const corePath = isRestricted 
-        ? 'https://unpkg.com/@ffmpeg/core-st@0.11.0/dist/ffmpeg-core.js' 
-        : 'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js';
-
-    try {
-        if (!ffmpeg) {
-            ffmpeg = FFmpeg.createFFmpeg({ 
-                log: false, 
-                corePath: corePath 
-            });
-        }
-        await ffmpeg.load();
-        ffmpegLoaded = true;
-        ffmpegLoading = false;
-        showSecurityWarning(false);
-        return true;
-    } catch (e) {
-        console.error("FFmpeg Load Fail:", e);
-        ffmpegLoading = false;
-        // If even the ST core fails, then we show the warning
-        showSecurityWarning(true);
-        return false;
-    }
-}
-
-function showSecurityWarning(show) {
-    const warningEl = document.getElementById('securityWarning');
-    if (show) {
-        warningEl?.classList.remove('hidden-zero-height');
-        warningEl?.classList.add('visible-height');
-    } else {
-        warningEl?.classList.add('hidden-zero-height');
-        warningEl?.classList.remove('visible-height');
-    }
-}
+// Import the Gradio Client (Ensure this is in your index.html or at the top of script.js)
+import { Client } from "https://cdn.jsdelivr.net/npm/@gradio/client/dist/index.min.js";
 
 async function runConversion(id) {
     const item = state.queue.find(i => i.id === id);
     if (!item) return;
 
     item.status = 'working';
-    item.progress = 1;
+    item.progress = 10; // Initial connection jump
     render();
 
     try {
-        let blob;
+        let resultBlob;
         const target = item.outputFormat;
 
-        if (item.category === 'VIDEO' || (item.category === 'AUDIO' && target !== 'wav')) {
-            const ready = await initFFmpeg();
-            if (!ready) throw new Error("Media engine could not start.");
-            
-            blob = await transcodeMedia(item, target, (p) => {
-                item.progress = Math.max(1, Math.floor(p * 100));
+        if (item.category === 'VIDEO' || item.category === 'AUDIO') {
+            // CALL HUGGING FACE ENGINE
+            resultBlob = await transcodeOnHuggingFace(item, target, (p) => {
+                item.progress = Math.max(10, Math.floor(p * 100));
                 render();
             });
-        } else if (item.category === 'AUDIO' && target === 'wav') {
-            blob = await processAudioNative(item.file);
         } else if (item.category === 'IMAGE') {
-            blob = await processImage(item.file, target);
+            resultBlob = await processImage(item.file, target);
         } else if (item.category === 'DATA') {
-            blob = await processData(item.file, target);
+            resultBlob = await processData(item.file, target);
         }
 
-        item.result = blob;
+        item.result = resultBlob;
         item.status = 'done';
         item.progress = 100;
     } catch (err) {
         item.status = 'error';
-        item.errorMsg = err.message;
+        item.errorMsg = "Engine Error: Ensure the HF Space is awake.";
+        console.error(err);
     }
     render();
 }
 
-async function transcodeMedia(item, target, onProgress) {
-    const inName = `input_${item.id}_${item.name}`;
-    const outName = `output_${item.id}.${target}`;
-    ffmpeg.setProgress(({ ratio }) => onProgress(ratio));
-    ffmpeg.FS('writeFile', inName, await FFmpeg.fetchFile(item.file));
-    
-    // Command Logic
-    if (item.category === 'VIDEO') {
-        // Presets optimized for browser CPU
-        await ffmpeg.run('-i', inName, '-preset', 'ultrafast', '-c:v', 'libx264', '-crf', '28', '-c:a', 'aac', outName);
-    } else {
-        // Audio: Force a specific codec for MP3/OGG to ensure compatibility
-        const codec = target === 'mp3' ? 'libmp3lame' : (target === 'ogg' ? 'libvorbis' : 'copy');
-        await ffmpeg.run('-i', inName, '-vn', '-acodec', codec, outName);
-    }
-    
-    const data = ffmpeg.FS('readFile', outName);
-    ffmpeg.FS('unlink', inName); 
-    ffmpeg.FS('unlink', outName);
+async function transcodeOnHuggingFace(item, target, onProgress) {
+    // 1. Connect to your Space
+    // Replace 'YOUR_USERNAME' with your actual Hugging Face username
+    const app = await Client.connect("YOUR_USERNAME/kinetic-convert-engine");
 
-    const mimes = { 
-        'mp4': 'video/mp4', 'webm': 'video/webm', 'mov': 'video/quicktime', 'avi': 'video/x-msvideo', 'mkv': 'video/x-matroska',
-        'mp3': 'audio/mpeg', 'ogg': 'audio/ogg', 'aac': 'audio/aac', 'flac': 'audio/flac', 'm4a': 'audio/mp4', 'gif': 'image/gif' 
-    };
-    return new Blob([data.buffer], { type: mimes[target] || 'application/octet-stream' });
+    // 2. Call the conversion function
+    // Pass [file, target_format] as defined in your app.py
+    const result = await app.predict("/predict", [
+        item.file, 
+        target
+    ]);
+
+    // 3. Fetch the resulting file from the HF server
+    const fileUrl = result.data[0].url;
+    const response = await fetch(fileUrl);
+    return await response.blob();
 }
 
-// Native WAV Logic (Bypasses all engines)
-async function processAudioNative(file) {
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const arrayBuffer = await file.arrayBuffer();
-    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-    const numOfChan = audioBuffer.numberOfChannels;
-    const length = audioBuffer.length * numOfChan * 2 + 44;
-    const buffer = new ArrayBuffer(length);
-    const view = new DataView(buffer);
-    const channels = [];
-    let offset = 0; let pos = 0;
-    const setUint32 = (d) => { view.setUint32(pos, d, true); pos += 4; };
-    const setUint16 = (d) => { view.setUint16(pos, d, true); pos += 2; };
-    setUint32(0x46464952); setUint32(length - 8); setUint32(0x45564157); setUint32(0x20746d66);
-    setUint32(16); setUint16(1); setUint16(numOfChan); setUint32(audioBuffer.sampleRate);
-    setUint32(audioBuffer.sampleRate * 2 * numOfChan); setUint16(numOfChan * 2);
-    setUint16(16); setUint32(0x61746164); setUint32(length - pos - 4);
-    for(let i=0; i<numOfChan; i++) channels.push(audioBuffer.getChannelData(i));
-    while(pos < length) {
-        for(let i=0; i<numOfChan; i++) {
-            let sample = Math.max(-1, Math.min(1, channels[i][offset]));
-            view.setInt16(pos, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
-            pos += 2;
-        }
-        offset++;
-    }
-    return new Blob([buffer], { type: 'audio/wav' });
-}
+// --- KEEPING YOUR NATIVE LOGIC FOR IMAGES/DATA ---
 
 async function processImage(file, target) {
     const ext = file.name.split('.').pop().toLowerCase();
@@ -325,9 +236,6 @@ function render() {
     
     if (!list || !container) return;
     
-    const hasErrors = state.queue.some(item => item.status === 'error');
-    if (!hasErrors) { showSecurityWarning(false); }
-
     if (state.queue.length === 0) {
         container.classList.add('hidden-zero-height');
         container.classList.remove('visible-height');
